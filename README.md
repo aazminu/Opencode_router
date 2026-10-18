@@ -2,6 +2,10 @@
 
 Automatic model routing for [OpenCode](https://opencode.ai) on the **Go**, **Go Plus**, and **Free** plans.
 
+![opencode-router demo: the scorecard gives each agent a model, and the build agent changes to the next model at 85% of its 5-hour limit](docs/router-demo.gif)
+
+[Watch the demo in full quality (MP4, 25 seconds)](docs/router-demo.mp4?raw=true)
+
 opencode-router gives each OpenCode agent the best model for its job and for your plan.
 It records how much of your quota each model uses. When a model is near its limit, the
 router moves the agent to the next model in its list. When the limit resets, the router
