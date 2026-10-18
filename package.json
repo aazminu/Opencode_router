@@ -1,0 +1,64 @@
+{
+  "name": "opencode-router",
+  "version": "1.0.0",
+  "description": "Dynamic model routing for OpenCode Go / Go Plus / Free. Picks the best value-for-money model per agent (plan, build, general, explore) and rotates automatically so a 24/7 build plan never runs out.",
+  "type": "module",
+  "license": "MIT",
+  "author": "s-berdia",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "router",
+    "model-routing",
+    "llm"
+  ],
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./cli": {
+      "types": "./dist/cli.d.ts",
+      "import": "./dist/cli.js"
+    }
+  },
+  "bin": {
+    "opencode-router": "./dist/cli.js"
+  },
+  "files": [
+    "dist",
+    "model-scores.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "refresh": "node dist/cli.js refresh",
+    "status": "node dist/cli.js status"
+  },
+  "dependencies": {},
+  "peerDependencies": {
+    "@opencode-ai/plugin": ">=1.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@opencode-ai/plugin": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "@opencode-ai/plugin": "^1.18.23",
+    "@types/node": "^22.10.2",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

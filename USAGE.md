@@ -1,0 +1,508 @@
+# opencode-router usage guide
+
+This guide gives the full procedure to install, use, change, and remove opencode-router.
+Do the steps in sequence. Each command has a label that tells you which shell to use.
+
+## Contents
+
+1. [Before you start](#1-before-you-start)
+2. [Install the plugin](#2-install-the-plugin)
+3. [Do the first refresh](#3-do-the-first-refresh)
+4. [Read the scorecard](#4-read-the-scorecard)
+5. [Select your plan](#5-select-your-plan)
+6. [Change the router settings](#6-change-the-router-settings)
+7. [Use the terminal tool](#7-use-the-terminal-tool)
+8. [Test the models](#8-test-the-models)
+9. [Files and folders](#9-files-and-folders)
+10. [Troubleshooting](#10-troubleshooting)
+11. [Known limits](#11-known-limits)
+12. [Remove the router](#12-remove-the-router)
+
+## 1. Before you start
+
+Make sure that you have these items:
+
+1. **OpenCode**, installed and signed in. Start it one time, then close it. This step
+   makes the model catalog file `~/.cache/opencode/models.json`.
+2. **Node.js 20 or later.** Do this check:
+
+   PowerShell, CMD, Git Bash, macOS, or Linux:
+
+   ```bash
+   node --version
+   ```
+
+   The result must be `v20` or higher. If the command fails, install Node.js from
+   <https://nodejs.org> (use the LTS version), then open a new terminal.
+3. **An OpenCode plan:** Go, Go Plus, or no subscription. With no subscription, the router
+   uses only free models.
+
+`~` means your home folder. On Windows, this is `C:\Users\<your-user-name>`.
+
+## 2. Install the plugin
+
+### Option A: from npm (recommended)
+
+1. Open the global OpenCode config file.
+
+   PowerShell (Windows):
+
+   ```powershell
+   New-Item -ItemType Directory -Force "$env:USERPROFILE\.config\opencode" | Out-Null
+   notepad "$env:USERPROFILE\.config\opencode\opencode.json"
+   ```
+
+   Git Bash, macOS, or Linux:
+
+   ```bash
+   mkdir -p ~/.config/opencode
+   nano ~/.config/opencode/opencode.json
+   ```
+
+   If you already have `opencode.jsonc` in that folder, open that file. If Notepad asks
+   to make a new file, click **Yes**.
+2. Make a backup copy of the file before you continue. The router writes to this file
+   (see [Known limits](#11-known-limits)).
+3. Add `"@s-berdia/opencode-router"` to the `plugin` list. If the file is empty, use all
+   of this text:
+
+   ```json
+   {
+     "$schema": "https://opencode.ai/config.json",
+     "plugin": ["@s-berdia/opencode-router"]
+   }
+   ```
+
+   If the file already has a `plugin` list, add the name to the list. Put a comma
+   between the items.
+4. Save the file. Close the editor.
+5. Close OpenCode. Start OpenCode again. OpenCode downloads the plugin when it starts.
+
+To use the router in one project only, put the `plugin` entry in `opencode.json` in the
+root folder of that project, not in the global file.
+
+### Option B: from source
+
+Use this option to test changes to the code.
+
+1. Clone and build the project.
+
+   PowerShell, Git Bash, macOS, or Linux:
+
+   ```bash
+   git clone https://github.com/s-berdia/Opencode_router.git
+   cd Opencode_router
+   npm install
+   npm run build
+   ```
+
+2. Get the absolute path of the folder.
+
+   PowerShell:
+
+   ```powershell
+   (Get-Location).Path
+   ```
+
+   Git Bash, macOS, or Linux:
+
+   ```bash
+   pwd
+   ```
+
+3. In `opencode.json`, add the path as a `file:///` URL. Use forward slashes (`/`).
+   - Windows example: `"plugin": ["file:///C:/code/Opencode_router"]`
+   - macOS or Linux example: `"plugin": ["file:///home/alex/Opencode_router"]`
+4. Restart OpenCode. After each code change, run `npm run build` and restart OpenCode.
+
+## 3. Do the first refresh
+
+1. In the OpenCode prompt, type `/` and look at the list of commands. Make sure that
+   these commands are in the list: `/refresh-routing`, `/routing-status`,
+   `/routing-plan`, and `/routing-eval`. If they are not in the list, go to
+   [Troubleshooting](#10-troubleshooting).
+2. Type this command and push Enter:
+
+   ```text
+   /refresh-routing
+   ```
+
+3. The router does these steps:
+   1. It reads the model catalog and your settings.
+   2. It gives a score to each model for each agent.
+   3. It writes the best models to the global `opencode.json`.
+   4. It applies the models to the running session.
+   5. It shows the scorecard.
+
+You do not have to restart OpenCode. From now on, the router selects the model for each
+message automatically.
+
+## 4. Read the scorecard
+
+The scorecard has one block of rows for each role. The first row of a block is the model
+that the role uses. The other rows are the failover models, in sequence.
+
+| Column | Meaning |
+| :-- | :-- |
+| Role | The agent: `plan`, `build`, `general`, `explore`, `small_model`, `title`, `summary`, `compaction` |
+| # | Position in the failover list. 1 is the first model |
+| Model | The model ID, in the form `provider/model` |
+| Var | The reasoning level (`high`, `medium`, `low`). `none` means the model default |
+| Score | The total score, 0 to 100 |
+| Intel | Intelligence score, 0 to 100 |
+| Speed | Speed score, 0 to 100 |
+| Endur | Endurance score, 0 to 100. A high value means that the model can run for a long time on your quota |
+| Tokens/5h | The estimated number of tokens that your quota gives in 5 hours. `unlimited` means no limit |
+| Cap/mo | The monthly dollar allowance for the model on your plan. `inf` means no limit |
+| Class | `go` = included in your Go subscription. `free*` = free (your data can be collected). `paid` = Zen pay-as-you-go |
+
+The **Notes** section under the table shows problems, for example a missing catalog.
+
+## 5. Select your plan
+
+The router finds your plan from the models in your catalog. If it selects the wrong plan,
+set the plan:
+
+1. In OpenCode, type the command with your plan (`go`, `go-plus`, or `free`):
+
+   ```text
+   /routing-plan go-plus
+   ```
+
+2. Then type:
+
+   ```text
+   /refresh-routing
+   ```
+
+The router saves the plan in `~/.config/opencode/router.config.json`.
+
+## 6. Change the router settings
+
+The router works with no settings. To change its behavior, make or edit
+`router.config.json`.
+
+| File | Applies to |
+| :-- | :-- |
+| `~/.config/opencode/router.config.json` | All projects |
+| `<project>/.opencode/router.config.json` | One project. Its values replace the global values |
+
+After each change, run `/refresh-routing`.
+
+Each example below is a complete file. To use more than one example, put all the keys in
+one JSON object.
+
+### Keep your main work off free models
+
+Free models can collect your data. This setting keeps the `plan`, `build`, and `general`
+agents on models that you pay for. The `explore` agent and the internal helpers can still
+use free models.
+
+```json
+{
+  "privacy": { "freeModelsOk": false }
+}
+```
+
+### Never use some models
+
+`*` matches any text. `?` matches one character.
+
+```json
+{
+  "denyModels": ["*-free", "*-preview", "opencode-go/kimi-k3"]
+}
+```
+
+### Use only some models
+
+If `allowModels` is not empty, the router uses only the models in the list.
+
+```json
+{
+  "allowModels": ["opencode-go/glm-*", "opencode-go/deepseek-*", "opencode/*-free"]
+}
+```
+
+### Change models earlier or later
+
+`softThreshold` sets when the router changes to the next model. `0.7` changes at 70% of
+the 5-hour limit. The default is `0.85`.
+
+```json
+{
+  "softThreshold": 0.7
+}
+```
+
+### Change what is important for one agent
+
+Each role has three weights. Use values that add up to 1.
+
+```json
+{
+  "weights": {
+    "plan": { "intelligence": 0.8, "speed": 0.05, "endurance": 0.15 },
+    "build": { "intelligence": 0.5, "speed": 0.2, "endurance": 0.3 }
+  }
+}
+```
+
+### Correct the score of a model
+
+Use this setting when you know that a model is better or worse than its score.
+
+```json
+{
+  "scores": {
+    "opencode-go/deepseek-v4.1-flash": { "intelligence": 82, "speed": 70 }
+  }
+}
+```
+
+### Change the number of failover models or the reasoning level
+
+```json
+{
+  "roles": {
+    "build": { "chainDepth": 2 },
+    "plan": { "variant": "medium" }
+  }
+}
+```
+
+The `roles.<role>` key also accepts:
+
+| Key | Meaning |
+| :-- | :-- |
+| `requires.toolCall` | `true` = use only models that can call tools |
+| `requires.reasoning` | `true` = use only reasoning models |
+| `requires.minContext` | Minimum context window, in tokens |
+| `requires.minOutput` | Minimum output limit, in tokens |
+| `preferFree` | `true` = put free models first |
+| `diversifyFamily` | `true` = do not put two models of the same family in sequence |
+
+### Use a benchmark feed
+
+The router can get intelligence and speed scores from a JSON file on the web. If the
+download fails, the router uses its normal scores.
+
+```json
+{
+  "feeds": { "enabled": true, "url": "https://example.com/scores.json", "timeoutMs": 5000 }
+}
+```
+
+The file at the URL must have this format. `id` matches one model. `family` matches all
+models of that family.
+
+```json
+{
+  "version": 1,
+  "models": [
+    { "id": "opencode-go/glm-5.3", "intelligence": 90, "speed": 45 },
+    { "family": "qwen", "intelligence": 80 }
+  ]
+}
+```
+
+### Advanced cost settings
+
+| Key | Default | Meaning |
+| :-- | :-- | :-- |
+| `blend.input` | `0.75` | Part of the tokens that are input |
+| `blend.output` | `0.25` | Part of the tokens that are output |
+| `blend.cacheRead` | `0.1` | Weight of the cache-read price |
+| `enduranceScale.minTokensPer5h` | `0.25` | Millions of tokens per 5 hours that give endurance 0 |
+| `enduranceScale.maxTokensPer5h` | `40` | Millions of tokens per 5 hours that give endurance 100 |
+
+The default scores, weights, and monthly allowances are in
+[`model-scores.json`](./model-scores.json).
+
+## 7. Use the terminal tool
+
+The terminal tool does the same calculation as the slash commands. Use it for scripts,
+CI, or scheduled jobs.
+
+You can run it with `npx` and no install:
+
+```bash
+npx @s-berdia/opencode-router --help
+```
+
+Or install it one time:
+
+```bash
+npm install -g @s-berdia/opencode-router
+opencode-router --help
+```
+
+These commands work in PowerShell, CMD, Git Bash, macOS, and Linux.
+
+| Command | What it does |
+| :-- | :-- |
+| `opencode-router refresh --dry-run` | Show the scorecard. Write nothing |
+| `opencode-router refresh --dry-run --verbose` | Also show the source of each score |
+| `opencode-router refresh --scope global` | Write the routing table to the global `opencode.json` |
+| `opencode-router refresh --scope project` | Write the routing table to `opencode.json` in the current folder |
+| `opencode-router refresh --plan free` | Use the `free` profile for this run only |
+| `opencode-router refresh --json` | Print the result as JSON |
+| `opencode-router status --scope global` | Show the first model of each role and its 5-hour use |
+| `opencode-router plan go-plus --scope global` | Save the plan in the global settings |
+| `opencode-router cat` | Show the catalog path, its date, and the number of models |
+| `opencode-router install --scope global` | Write the slash commands as files in `~/.config/opencode/command/` |
+
+If you do not give `--scope`, the tool uses `project` in a project folder (a folder with
+`.git`, `package.json`, `opencode.json`, `pyproject.toml`, `Cargo.toml`, or `go.mod`) and
+`global` in other folders.
+
+### Apply to a running OpenCode server
+
+When OpenCode runs as a server (`opencode serve`), the terminal tool can send the new
+models to it. Set these environment variables before you run `refresh`:
+
+| Variable | Value |
+| :-- | :-- |
+| `OPENCODE_SERVER_URL` | The server URL, for example `http://127.0.0.1:4096` |
+| `OPENCODE_SERVER_USERNAME` | Optional. The basic-auth user name |
+| `OPENCODE_SERVER_PASSWORD` | Optional. The basic-auth password |
+
+PowerShell:
+
+```powershell
+$env:OPENCODE_SERVER_URL = "http://127.0.0.1:4096"
+npx @s-berdia/opencode-router refresh --scope global
+```
+
+Git Bash, macOS, or Linux:
+
+```bash
+OPENCODE_SERVER_URL="http://127.0.0.1:4096" npx @s-berdia/opencode-router refresh --scope global
+```
+
+If you do not set the URL, a running OpenCode session calculates the routing again on
+its next message (in 15 seconds or less).
+
+## 8. Test the models
+
+`/routing-eval` sends one coding prompt to each model in the `build` list. It then
+writes a report that compares the predicted ranks with the measured results. The prompt
+is in [`evals/prompt.md`](./evals/prompt.md).
+
+1. Get your OpenCode API key.
+2. Set the key in the terminal. Do not write the key in a file that you commit.
+
+   PowerShell:
+
+   ```powershell
+   $env:OPENCODE_API_KEY = "<your-api-key>"
+   ```
+
+   Git Bash, macOS, or Linux:
+
+   ```bash
+   export OPENCODE_API_KEY="<your-api-key>"
+   ```
+
+3. Run the test from the same terminal:
+
+   ```bash
+   npx @s-berdia/opencode-router eval --plan go
+   ```
+
+4. Open `evals/report.md` in the current folder.
+
+**Caution:** The test sends up to 4 real requests. Each request can use up to 2000
+output tokens of your quota.
+
+If `OPENCODE_API_KEY` is not set, the test sends no requests. It writes only the
+predicted ranks.
+
+## 9. Files and folders
+
+The router writes these files:
+
+| File | Written by | Contents |
+| :-- | :-- | :-- |
+| `~/.config/opencode/router/ledger.json` | Plugin | Spend and tokens per model for 5 hours, 7 days, and 30 days, and cooldowns |
+| `~/.config/opencode/router/routing-table.json` | Plugin | The last routing table |
+| `~/.config/opencode/router/last-apply.json` | Plugin | The result of the last live apply |
+| `~/.config/opencode/opencode.json` | `/refresh-routing` | `model`, `small_model`, and `agent.<role>.model` and `variant` |
+| `~/.config/opencode/router.config.json` | `/routing-plan` | Your router settings |
+| `evals/report.md` (current folder) | `/routing-eval` | The test report |
+
+If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in place of
+`~/.config/opencode`. If `XDG_CACHE_HOME` is set, the router reads the catalog from
+`$XDG_CACHE_HOME/opencode/models.json`.
+
+Do not commit the `router/` folder or `evals/report.md`. They contain your usage data.
+
+## 10. Troubleshooting
+
+| Problem | Cause | Action |
+| :-- | :-- | :-- |
+| The `/refresh-routing` command is not in the list | OpenCode did not load the plugin | Make sure that the name in `plugin` is `@s-berdia/opencode-router` and the JSON is valid. Restart OpenCode |
+| The scorecard says "No models found" | The catalog file is missing | Start OpenCode and sign in. Then run `npx @s-berdia/opencode-router cat`. "Routed models" must be more than 0 |
+| A role shows `_no eligible model_` | Your settings removed all models for that role | Make `denyModels` and `allowModels` less strict. With `privacy.freeModelsOk: false` on the `free` plan, `plan` and `build` have no models |
+| A slash command shows an error that `node` is not found | Node.js is not on the `PATH` of OpenCode | Install Node.js 20 or later. Restart the computer or the terminal, then OpenCode |
+| `status` in a terminal shows 0% use | The terminal read the project ledger. The plugin writes the global ledger | Add `--scope global` |
+| "live PATCH not attempted (no OPENCODE_SERVER_URL set)" | Normal when you run `refresh` in a terminal | No action. Or see [Apply to a running OpenCode server](#apply-to-a-running-opencode-server) |
+| "hot-apply failed: ..." | OpenCode did not accept the change | Restart OpenCode. The file `opencode.json` has the new models |
+| A model that you selected by hand changes back | The router selects the model at each message | See [Known limits](#11-known-limits) |
+| The scores look wrong | A model has no entry in `model-scores.json` | Run `npx @s-berdia/opencode-router refresh --dry-run --verbose`. If the source is `heuristic` or `default`, add the model to `scores` |
+
+## 11. Known limits
+
+These are the limits of version 1.0.0.
+
+1. The router sets the model of the `plan`, `build`, `general`, and `explore` agents at
+   each message. If you select a different model by hand, the router replaces it. To
+   stop this, remove the plugin.
+2. `/refresh-routing` writes the global `opencode.json`. It removes comments from an
+   `opencode.jsonc` file. If the file has a JSON error, the router replaces the file, and
+   your other settings are lost. Keep a backup copy.
+3. `/refresh-routing go-plus` shows the scorecard for `go-plus`, but the router continues
+   to use your saved plan. To change the plan, use `/routing-plan`.
+4. The terminal tool reads only the global `router.config.json`. The project file applies
+   only in OpenCode.
+5. A top-level `chainDepth` key has no effect. Use `roles.<role>.chainDepth`.
+6. `install` replaces your `router.config.json`. Keep a backup copy.
+7. The internal helpers (`small_model`, `title`, `summary`, `compaction`) do not change
+   to a failover model.
+8. Use numbers are estimates. The router takes 20% of the monthly allowance as the
+   5-hour limit. The 5-hour period starts at the first message after the last period
+   ended. Two OpenCode windows that run at the same time can overwrite each other's use
+   data.
+9. After a rate-limit error for the full session, all models go into a 1-hour cooldown.
+   During that time, the router uses the first model of each list.
+10. `/routing-status` shows the first model of each list. It does not show the failover
+    model that is in use.
+
+## 12. Remove the router
+
+1. Open `opencode.json` (see [step 2](#2-install-the-plugin)).
+2. Remove `"@s-berdia/opencode-router"` from the `plugin` list.
+3. Remove the keys that the router wrote: `model`, `small_model`, and the `model` and
+   `variant` keys under `agent.plan`, `agent.build`, `agent.general`, `agent.explore`,
+   `agent.title`, `agent.summary`, and `agent.compaction`. If you do not remove them,
+   OpenCode continues to use those models.
+4. Save the file.
+5. Delete the router data.
+
+   PowerShell:
+
+   ```powershell
+   Remove-Item -Recurse -Force "$env:USERPROFILE\.config\opencode\router"
+   Remove-Item -Force "$env:USERPROFILE\.config\opencode\router.config.json" -ErrorAction SilentlyContinue
+   ```
+
+   Git Bash, macOS, or Linux:
+
+   ```bash
+   rm -rf ~/.config/opencode/router
+   rm -f ~/.config/opencode/router.config.json
+   ```
+
+6. If you ran `install`, delete these files from `~/.config/opencode/command/`:
+   `refresh-routing.md`, `routing-status.md`, `routing-plan.md`, and `routing-eval.md`.
+7. Restart OpenCode.

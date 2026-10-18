@@ -1,0 +1,25 @@
+{
+  "plan": "go",
+  "chainDepth": 4,
+  "softThreshold": 0.85,
+  "privacy": {
+    "freeModelsOk": true
+  },
+  "feeds": {
+    "enabled": false,
+    "url": "",
+    "timeoutMs": 5000
+  },
+  "denyModels": [],
+  "allowModels": [],
+  "enduranceScale": {
+    "minTokensPer5h": 0.25,
+    "maxTokensPer5h": 40
+  },
+  "weights": {
+    "build": { "intelligence": 0.4, "speed": 0.25, "endurance": 0.35 }
+  },
+  "scores": {
+    "opencode-go/deepseek-v4.1-flash": { "intelligence": 82 }
+  }
+}

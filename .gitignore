@@ -1,0 +1,26 @@
+node_modules/
+dist/
+*.log
+
+# Router runtime state (never commit spend data)
+.opencode/state/
+router-state.json
+ledger.json
+*.local.json
+
+# Local overrides
+router.config.local.json
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets
+.env
+.env.*
+
+# Generated reports and packages
+evals/report.md
+*.tgz
