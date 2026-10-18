@@ -1,14 +1,37 @@
-// Shared types for opencode-router.
+// Shared types and the constant lists they are built from.
 
-export type PlanProfile = "go" | "go-plus" | "free"
+export const PLAN_PROFILES = ["go", "go-plus", "free"] as const
 
-export type InstallScope = "global" | "project"
+export type PlanProfile = (typeof PLAN_PROFILES)[number]
 
-export type BuiltinRole = "plan" | "build" | "general" | "explore"
+export function isPlan(value: unknown): value is PlanProfile {
+  return typeof value === "string" && (PLAN_PROFILES as readonly string[]).includes(value)
+}
 
-export type InternalRole = "small_model" | "title" | "summary" | "compaction"
+/** Which config files a command reads and writes. */
+export type ConfigScope = "global" | "project"
 
-export type RoleName = BuiltinRole | InternalRole
+/** OpenCode agents that the router switches per message. */
+export const AGENT_ROLES = ["plan", "build", "general", "explore"] as const
+
+/** Helper models that OpenCode reads from the config only. */
+export const INTERNAL_ROLES = ["small_model", "title", "summary", "compaction"] as const
+
+export const ROLE_NAMES = [...AGENT_ROLES, ...INTERNAL_ROLES] as const
+
+export type AgentRole = (typeof AGENT_ROLES)[number]
+
+export type InternalRole = (typeof INTERNAL_ROLES)[number]
+
+export type RoleName = AgentRole | InternalRole
+
+export function isAgentRole(value: string | undefined): value is AgentRole {
+  return value !== undefined && (AGENT_ROLES as readonly string[]).includes(value)
+}
+
+export function isRoleName(value: string): value is RoleName {
+  return (ROLE_NAMES as readonly string[]).includes(value)
+}
 
 export type ScoreSource = "override" | "cap" | "feed" | "heuristic" | "default"
 
@@ -19,6 +42,14 @@ export interface Weights {
   speed: number
   endurance: number
 }
+
+/** Intelligence and speed values from the score table, a feed, or the user. */
+export interface MetricScores {
+  intelligence?: number
+  speed?: number
+}
+
+export type Metric = keyof MetricScores
 
 export interface RoleRequirement {
   toolCall?: boolean
@@ -33,10 +64,8 @@ export interface RoleSpec {
   variant?: string
   chainDepth?: number
   requires?: RoleRequirement
-  /** Prefer $0 models; adds a large bonus to the endurance term for free models. */
+  /** Prefer $0 models; adds a bonus to the score of free models. */
   preferFree?: boolean
-  /** When false, $0 (data-collecting) models are excluded from this role. */
-  allowFree?: boolean
   /** Avoid two adjacent picks from the same model family. */
   diversifyFamily?: boolean
 }
@@ -108,14 +137,16 @@ export interface RankingEntry {
   class: ModelClass
 }
 
+export type RoleChains = Partial<Record<RoleName, RankingEntry[]>>
+
 export interface RoutingTable {
   version: number
   createdAt: string
   plan: PlanProfile
   /** role -> ranked chain for the active plan. */
-  active: Record<string, RankingEntry[]>
+  active: RoleChains
   /** plan -> role -> ranked chain (all computed plans). */
-  profiles: Partial<Record<PlanProfile, Record<string, RankingEntry[]>>>
+  profiles: Partial<Record<PlanProfile, RoleChains>>
   notes: string[]
 }
 
@@ -124,22 +155,32 @@ export interface EnduranceScale {
   maxTokensPer5h: number
 }
 
+export interface CostBlend {
+  input: number
+  output: number
+  cacheRead: number
+}
+
+export interface FeedConfig {
+  enabled?: boolean
+  url?: string
+  timeoutMs?: number
+}
+
 export interface RouterUserConfig {
   plan?: PlanProfile
-  scope?: InstallScope
   chainDepth?: number
   softThreshold?: number
-  blend?: { input: number; output: number; cacheRead: number }
-  enduranceScale?: EnduranceScale
+  blend?: Partial<CostBlend>
+  enduranceScale?: Partial<EnduranceScale>
   weights?: Partial<Record<RoleName, Partial<Weights>>>
   roles?: Partial<Record<RoleName, Partial<RoleSpec>>>
   denyModels?: string[]
   allowModels?: string[]
   privacy?: { freeModelsOk?: boolean }
-  budget?: { usdMonthly?: number }
-  feeds?: { enabled?: boolean; url?: string; timeoutMs?: number }
+  feeds?: FeedConfig
   /** Explicit score overrides, keyed by `provider/model`. */
-  scores?: Record<string, Partial<Pick<ScoredModel, "intelligence" | "speed">>>
+  scores?: Partial<Record<string, MetricScores>>
 }
 
 export interface LedgerModelState {
@@ -163,13 +204,18 @@ export interface Ledger {
   models: Record<string, LedgerModelState>
 }
 
+export interface MonthlyCap {
+  go: number | null
+  goPlus: number | null
+}
+
 export interface ScoreTable {
   version: number
   updated: string
   /** role -> weights/variant/requirements. */
-  roles: Record<string, RoleSpec>
+  roles: Partial<Record<RoleName, RoleSpec>>
   /** `provider/model` -> fixed scores (wins over heuristics). */
-  models: Record<string, { intelligence?: number; speed?: number }>
+  models: Record<string, MetricScores>
   /** Ordered family/substring patterns; first match wins. */
   heuristics: {
     patterns: Array<{ match: string; intelligence: number; speed: number }>
@@ -179,7 +225,7 @@ export interface ScoreTable {
     unvettedPenalty?: number
   }
   /** Monthly USD allowance per model: { go, goPlus }. null = unlimited. */
-  monthlyCaps: Record<string, { go: number | null; goPlus: number | null }>
+  monthlyCaps: Record<string, MonthlyCap>
   /**
    * Score adjustment per plan and model class. On paid plans the subscription
    * models get an edge so the plan you pay for is used first and $0 models
@@ -190,10 +236,9 @@ export interface ScoreTable {
 
 export interface ResolvedConfig extends RouterUserConfig {
   plan: PlanProfile
-  scope: InstallScope
   chainDepth: number
   softThreshold: number
-  blend: { input: number; output: number; cacheRead: number }
+  blend: CostBlend
   enduranceScale: EnduranceScale
   denyModels: string[]
   allowModels: string[]

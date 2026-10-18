@@ -16,7 +16,7 @@ stress-test the scoring. It exercises planning, building, and testing in one tas
 | Cost (USD) | Estimated from the model's blended rate |
 | Static pass | 7 checks on the returned text (add, list, done, rm, `--json`, validation, tests) |
 
-The report at `evals/report.md` compares the **predicted rank** (from the score
+The report at `~/.config/opencode/router/eval-report.md` compares the **predicted rank** (from the score
 table) with the **measured rank** (pass rate, then latency). Feed differences back
 into `model-scores.json` or `router.config.json` -> `scores` to tune accuracy.
 

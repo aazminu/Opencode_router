@@ -1,15 +1,6 @@
+import { ROLE_NAMES } from "./types.js"
 import type { RankingEntry, RoutingTable } from "./types.js"
-
-const ROLE_ORDER = [
-  "plan",
-  "build",
-  "general",
-  "explore",
-  "small_model",
-  "title",
-  "summary",
-  "compaction",
-]
+import type { StatusRow } from "./engine.js"
 
 function fmtTokens(value: number | null): string {
   if (value === null) return "unlimited"
@@ -39,14 +30,9 @@ export function formatScorecard(table: RoutingTable, opts: { verbose?: boolean }
   lines.push("| Role | # | Model | Var | Score | Intel | Speed | Endur | Tokens/5h | Cap/mo | Class |")
   lines.push("| :-- | --: | :-- | :-- | --: | --: | --: | --: | --: | --: | :-- |")
 
-  const roles = Object.keys(table.active).sort((a, b) => {
-    const ia = ROLE_ORDER.indexOf(a)
-    const ib = ROLE_ORDER.indexOf(b)
-    return (ia === -1 ? 99 : ia) - (ib === -1 ? 99 : ib)
-  })
-
-  for (const role of roles) {
-    const chain = table.active[role] ?? []
+  for (const role of ROLE_NAMES) {
+    const chain = table.active[role]
+    if (!chain) continue
     if (chain.length === 0) {
       lines.push(`| ${role} | - | _no eligible model_ | | | | | | | | |`)
       continue
@@ -69,28 +55,31 @@ export function formatScorecard(table: RoutingTable, opts: { verbose?: boolean }
   }
 
   lines.push("")
-  lines.push(`_Sources: override = committed/user table, feed = external benchmark, cap = computed from quota, heuristic = pattern rules._`)
+  lines.push(
+    opts.verbose
+      ? `_Sources (intel/speed/endur): override = committed/user table, feed = external benchmark, cap = computed from quota, heuristic = name pattern, default = no match._`
+      : `_Run \`opencode-router refresh --dry-run --verbose\` in a terminal to see the source of each score._`,
+  )
   return lines.join("\n")
 }
 
-export function formatStatus(table: RoutingTable, usage: Record<string, { pct: number; label: string }>): string {
+export function formatStatus(table: RoutingTable, rows: StatusRow[]): string {
   const lines: string[] = []
   lines.push(`## opencode-router status`)
   lines.push("")
   lines.push(`- Plan: **${table.plan}**`)
+  lines.push(
+    `- State: healthy = first model; failover = a later model, because the first is limited; limited = the model in use is near its limit or in cooldown`,
+  )
   lines.push("")
-  lines.push("| Role | Active model | Rank | Usage (5h) | State |")
+  lines.push("| Role | Model in use | Rank | Usage (5h) | State |")
   lines.push("| :-- | :-- | --: | --: | :-- |")
-  for (const [role, chain] of Object.entries(table.active)) {
-    const active = chain[0]
-    if (!active) {
-      lines.push(`| ${role} | _none_ | - | - | - |`)
+  for (const row of rows) {
+    if (!row.entry) {
+      lines.push(`| ${row.role} | _none_ | - | - | - |`)
       continue
     }
-    const u = usage[active.id]
-    const usageText = u ? `${u.pct.toFixed(0)}%` : "-"
-    const state = u && u.pct >= 85 ? "throttled" : "healthy"
-    lines.push(`| ${role} | \`${active.id}\` | ${active.rank} | ${usageText} | ${state} |`)
+    lines.push(`| ${row.role} | \`${row.entry.id}\` | ${row.entry.rank} | ${row.pct5h.toFixed(0)}% | ${row.state} |`)
   }
   return lines.join("\n")
 }

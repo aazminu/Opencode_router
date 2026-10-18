@@ -1,37 +1,43 @@
 import path from "node:path"
-import fs from "node:fs"
-import type { RoutingTable } from "./types.js"
+import { AGENT_ROLES, isAgentRole } from "./types.js"
+import type { ConfigScope, RoutingTable } from "./types.js"
 import {
-  ensureDir,
+  editJsonFile,
   fileExists,
   globalConfigDir,
   globalOpencodeConfigCandidates,
-  globalStateDir,
   opencodeConfigCandidates,
-  readJson,
-  writeJson,
+  type JsonEdit,
 } from "./paths.js"
 
-const AGENT_ROLES = ["plan", "build", "general", "explore"] as const
-const INTERNAL_AGENT_ROLES = ["compaction", "title", "summary"] as const
+/** Internal roles that OpenCode configures as agents (`small_model` is a top-level key). */
+const INTERNAL_AGENTS = ["compaction", "title", "summary"] as const
 
-export interface RoutingConfigBody {
+const SCHEMA_URL = "https://opencode.ai/config.json"
+
+// Type aliases, not interfaces: OpenCode's Config type has index signatures,
+// and only an alias gets the implicit index signature that matches them.
+export type AgentModel = {
+  model: string
+  variant?: string
+}
+
+export type RoutingConfigBody = {
   model?: string
   small_model?: string
-  agent: Record<string, { model: string; variant?: string }>
+  agent: Record<string, AgentModel>
 }
 
 /** Build the OpenCode config fragment that expresses the routing table. */
 export function routingConfigBody(table: RoutingTable): RoutingConfigBody {
-  const agent: Record<string, { model: string; variant?: string }> = {}
+  const agent: Record<string, AgentModel> = {}
 
   for (const role of AGENT_ROLES) {
     const entry = table.active[role]?.[0]
     if (!entry) continue
-    const spec = entry.variant && entry.variant !== "none" ? { model: entry.id, variant: entry.variant } : { model: entry.id }
-    agent[role] = spec
+    agent[role] = entry.variant && entry.variant !== "none" ? { model: entry.id, variant: entry.variant } : { model: entry.id }
   }
-  for (const role of INTERNAL_AGENT_ROLES) {
+  for (const role of INTERNAL_AGENTS) {
     const entry = table.active[role]?.[0]
     if (!entry) continue
     agent[role] = { model: entry.id }
@@ -48,103 +54,49 @@ export function routingConfigBody(table: RoutingTable): RoutingConfigBody {
 export interface WriteResult {
   path: string
   created: boolean
-  previous: Partial<RoutingConfigBody> | null
 }
 
 /** Pick the config file to write for the given scope. */
-export function pickConfigPath(scope: "global" | "project", dir: string): string {
+export function pickConfigPath(scope: ConfigScope, dir: string): string {
   const candidates = scope === "global" ? globalOpencodeConfigCandidates() : opencodeConfigCandidates(dir)
   for (const candidate of candidates) {
     if (fileExists(candidate)) return candidate
   }
-  return scope === "global"
-    ? path.join(globalConfigDir(), "opencode.json")
-    : path.join(dir, "opencode.json")
+  return scope === "global" ? path.join(globalConfigDir(), "opencode.json") : path.join(dir, "opencode.json")
 }
 
 /**
- * Merge the routing table into the user's opencode.json(c) without touching
- * unrelated keys. Preserves `$schema` and any other fields the user has.
+ * Write the routing table into the user's opencode.json(c). Only the keys the
+ * router owns change: `model`, `small_model`, and `agent.<role>.model` (plus
+ * `variant` for the agent roles). Comments and all other keys stay. A file
+ * with a JSON error is never replaced: this throws and leaves it as it is.
  */
-export function writeRoutingConfig(
-  table: RoutingTable,
-  scope: "global" | "project",
-  dir: string = process.cwd(),
-): WriteResult {
+export function writeRoutingConfig(table: RoutingTable, scope: ConfigScope, dir: string): WriteResult {
   const target = pickConfigPath(scope, dir)
-  const created = !fileExists(target)
-  const existing = (readJson<Record<string, unknown>>(target) ?? {}) as Record<string, unknown>
-
-  const previous: Partial<RoutingConfigBody> | null =
-    existing.agent || existing.model || existing.small_model
-      ? {
-          model: existing.model as string | undefined,
-          small_model: existing.small_model as string | undefined,
-          agent: existing.agent as RoutingConfigBody["agent"] | undefined,
-        }
-      : null
-
   const body = routingConfigBody(table)
-  const merged: Record<string, unknown> = {
-    ...existing,
-    $schema: existing.$schema ?? "https://opencode.ai/config.json",
-    agent: { ...(existing.agent as object | undefined), ...body.agent },
-  }
-  if (body.model) merged.model = body.model
-  if (body.small_model) merged.small_model = body.small_model
 
-  ensureDir(path.dirname(target))
-  writeJson(target, merged)
-  return { path: target, created, previous }
+  const edits: JsonEdit[] = []
+  if (body.model) edits.push({ path: ["model"], value: body.model })
+  if (body.small_model) edits.push({ path: ["small_model"], value: body.small_model })
+  for (const [role, spec] of Object.entries(body.agent)) {
+    edits.push({ path: ["agent", role, "model"], value: spec.model })
+    if (isAgentRole(role)) edits.push({ path: ["agent", role, "variant"], value: spec.variant })
+  }
+
+  const { created } = editJsonFile(target, edits, `{\n  "$schema": "${SCHEMA_URL}"\n}\n`)
+  return { path: target, created }
 }
 
-/** The routing config a user should add to `plugin` in opencode.json. */
-export function pluginEntrySpec(): string {
-  try {
-    const pkg = readJson<{ name?: string; version?: string }>(path.join(process.cwd(), "package.json"))
-    if (pkg?.name && pkg.name === "opencode-router") return "opencode-router"
-  } catch {
-    /* ignore */
-  }
-  return "opencode-router"
-}
-
-export interface HotApplyResult {
+export interface ServerPatchResult {
   applied: boolean
   detail: string
 }
 
-/** Marker the plugin writes after a successful in-session hot-apply. */
-export function applyMarkerFile(): string {
-  return path.join(globalStateDir(), "last-apply.json")
-}
-
-export function writeApplyMarker(detail: string): void {
-  writeJson(applyMarkerFile(), { at: new Date().toISOString(), detail })
-}
-
-export function readApplyMarker(maxAgeMs = 60_000): string | null {
-  const marker = readJson<{ at?: string; detail?: string }>(applyMarkerFile())
-  if (!marker?.at || !marker.detail) return null
-  const at = Date.parse(marker.at)
-  if (!Number.isFinite(at) || Date.now() - at > maxAgeMs) return null
-  return marker.detail
-}
-
-export function clearApplyMarker(): void {
-  try {
-    fs.rmSync(applyMarkerFile(), { force: true })
-  } catch {
-    /* ignore */
-  }
-}
-
 /**
- * Best-effort live apply: PATCH the running OpenCode server's config so the
- * running session picks up the new model assignment without a restart.
- * Honors OPENCODE_SERVER_URL (+ basic auth) when set.
+ * Best-effort live apply from the CLI: PATCH the running OpenCode server's
+ * config. Used only when OPENCODE_SERVER_URL (+ optional basic auth) is set.
  */
-export async function hotApply(table: RoutingTable): Promise<HotApplyResult> {
+export async function patchServerConfig(table: RoutingTable): Promise<ServerPatchResult> {
   const base = process.env.OPENCODE_SERVER_URL ?? process.env.OPENCODE_SERVER
   if (!base) {
     return { applied: false, detail: "live PATCH not attempted (no OPENCODE_SERVER_URL set)" }
@@ -164,18 +116,4 @@ export async function hotApply(table: RoutingTable): Promise<HotApplyResult> {
     const message = error instanceof Error ? error.message : String(error)
     return { applied: false, detail: `PATCH failed: ${message}` }
   }
-}
-
-export function hasExistingRouterConfig(dir: string): boolean {
-  return opencodeConfigCandidates(dir).some((c) => fileExists(c)) || globalOpencodeConfigCandidates().some((c) => fileExists(c))
-}
-
-export function readRawConfig(dir: string): string | null {
-  for (const candidate of opencodeConfigCandidates(dir)) {
-    if (fileExists(candidate)) return fs.readFileSync(candidate, "utf8")
-  }
-  for (const candidate of globalOpencodeConfigCandidates()) {
-    if (fileExists(candidate)) return fs.readFileSync(candidate, "utf8")
-  }
-  return null
 }

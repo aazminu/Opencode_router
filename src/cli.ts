@@ -1,81 +1,118 @@
 import { parseArgs } from "node:util"
-import path from "node:path"
-import { buildRoutingTable } from "./engine.js"
+import { activeEntries, buildRoutingTable, statusRows, usagePercent } from "./engine.js"
 import { formatScorecard, formatStatus } from "./format.js"
-import { hotApply, writeRoutingConfig, readApplyMarker } from "./apply.js"
+import { patchServerConfig, routingConfigBody, writeRoutingConfig } from "./apply.js"
 import { LedgerStore } from "./ledger.js"
-import { resolveTable } from "./score-table.js"
-import { loadUserConfig, mergeUserConfig } from "./config.js"
 import { catalogMeta } from "./catalog.js"
-import { globalRouterConfigFile, projectRouterConfigFile, globalStateDir, projectStateDir, readJson, writeJson, isProjectDir } from "./paths.js"
-import type { PlanProfile } from "./types.js"
+import { installCommands } from "./install.js"
+import { runEval } from "./eval.js"
+import { editJsonFile, globalRouterConfigFile, isProjectDir, projectRouterConfigFile, readJson } from "./paths.js"
+import { ledgerFile, readApplyMarker } from "./state.js"
+import { isPlan, PLAN_PROFILES } from "./types.js"
+import type { ConfigScope, PlanProfile } from "./types.js"
 
 const HELP = `opencode-router - dynamic model routing for OpenCode Go / Go Plus / Free
 
 Usage:
   opencode-router refresh [options]     Recompute the routing table and apply it
-  opencode-router status  [options]     Show the current table and live quota use
-  opencode-router plan <profile>        Set the plan profile (go | go-plus | free)
-  opencode-router install [--scope]     Write slash commands + starter config
-  opencode-router cat                   Show catalog metadata (source, age, count)
-  opencode-router eval                  Run the scoring stress test (see evals/)
+  opencode-router status  [options]     Show the model in use per role and its 5-hour quota use
+  opencode-router plan <profile>        Save the plan profile (go | go-plus | free) and rebuild
+  opencode-router install [--scope]     Write slash-command files and a starter config
+  opencode-router cat                   Show catalog metadata (path, date, model count)
+  opencode-router eval                  Run the scoring stress test
 
 Options:
-  --plan <go|go-plus|free>   Plan profile to use
-  --scope <project|global>   Which opencode.json to write (default: project)
+  --plan <go|go-plus|free>   Plan profile for this run
+  --scope <project|global>   Which config files to write (default: project in a project folder, else global)
   --catalog <file>           Path to an OpenCode models.json cache
-  --dry-run                  Do not write any file
-  --no-apply                 Write config but do not hot-apply to the server
+  --dry-run                  Do not write opencode.json
+  --no-apply                 Write opencode.json but do not send it to a running server
   --json                     Print machine-readable JSON
   --verbose                  Include score source tags
   -h, --help                 Show this help
 `
 
-function isPlan(value: string | undefined): value is PlanProfile {
-  return value === "go" || value === "go-plus" || value === "free"
-}
+const PLAN_CHOICES = PLAN_PROFILES.join(" | ")
+
+/** A mistake in the command line: exit code 2 with a short message, no stack trace. */
+class UsageError extends Error {}
 
 interface CommonOpts {
   plan?: PlanProfile
-  scope: "project" | "global"
-  scopeExplicit: boolean
+  scope: ConfigScope
   catalog?: string
   dryRun: boolean
   apply: boolean
   json: boolean
   verbose: boolean
+  cwd: string
 }
 
 /**
  * Resolve the config scope. When the caller did not pass --scope and the
- * current directory is not a real project (for example OpenCode's shell
- * injection runs from the home directory), fall back to the global config.
+ * directory is not a real project (for example OpenCode's shell runs from the
+ * home directory), fall back to the global config.
  */
-export function resolveScope(explicit: boolean, value: "project" | "global", dir: string = process.cwd()): "project" | "global" {
+export function resolveScope(explicit: boolean, value: ConfigScope, dir: string): ConfigScope {
   if (explicit) return value
   return isProjectDir(dir) ? "project" : "global"
 }
 
-function commonOptions(values: Record<string, unknown>): CommonOpts {
-  const plan = typeof values.plan === "string" ? values.plan : undefined
-  return {
-    plan: isPlan(plan) ? plan : undefined,
-    scope: values.scope === "global" ? "global" : "project",
-    scopeExplicit: values.scope !== undefined,
-    catalog: typeof values.catalog === "string" ? values.catalog : undefined,
+function parsePlan(value: string | undefined): PlanProfile | undefined {
+  if (value === undefined) return undefined
+  if (!isPlan(value)) throw new UsageError(`--plan must be one of ${PLAN_CHOICES}, not "${value}"`)
+  return value
+}
+
+function parseScope(value: string | undefined): ConfigScope | undefined {
+  if (value === undefined || value === "project" || value === "global") return value
+  throw new UsageError(`--scope must be project or global, not "${value}"`)
+}
+
+function parseCommandLine(argv: string[], cwd: string) {
+  let parsed
+  try {
+    parsed = parseArgs({
+      args: argv,
+      options: {
+        plan: { type: "string" },
+        scope: { type: "string" },
+        catalog: { type: "string" },
+        "dry-run": { type: "boolean" },
+        "no-apply": { type: "boolean" },
+        json: { type: "boolean" },
+        verbose: { type: "boolean" },
+        help: { type: "boolean", short: "h" },
+      },
+      allowPositionals: true,
+    })
+  } catch (error) {
+    throw new UsageError(error instanceof Error ? error.message : String(error))
+  }
+  const { values, positionals } = parsed
+  const scope = parseScope(values.scope)
+  const opts: CommonOpts = {
+    plan: parsePlan(values.plan),
+    scope: resolveScope(scope !== undefined, scope ?? "project", cwd),
+    catalog: values.catalog,
     dryRun: values["dry-run"] === true,
     apply: values["no-apply"] !== true,
     json: values.json === true,
     verbose: values.verbose === true,
+    cwd,
   }
+  return { command: positionals[0], args: positionals.slice(1), help: values.help === true, opts }
+}
+
+function build(opts: CommonOpts) {
+  return buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog, projectDir: opts.cwd })
 }
 
 async function cmdRefresh(opts: CommonOpts): Promise<number> {
-  const { table } = await buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog })
-  const body = { model: table.active.build?.[0]?.id, small_model: table.active.small_model?.[0]?.id, agents: Object.fromEntries(Object.entries(table.active).map(([r, c]) => [r, c[0]?.id])) }
+  const { table } = await build(opts)
 
   if (opts.json) {
-    process.stdout.write(JSON.stringify({ table, applied: body }, null, 2) + "\n")
+    process.stdout.write(JSON.stringify({ table, routing: routingConfigBody(table) }, null, 2) + "\n")
   } else {
     process.stdout.write(formatScorecard(table, { verbose: opts.verbose }) + "\n")
   }
@@ -83,19 +120,17 @@ async function cmdRefresh(opts: CommonOpts): Promise<number> {
   let detail = "dry-run: nothing written"
   let applied = false
   if (!opts.dryRun) {
-    const scope = resolveScope(opts.scopeExplicit, opts.scope)
-    const written = writeRoutingConfig(table, scope)
+    const written = writeRoutingConfig(table, opts.scope, opts.cwd)
     detail = `${written.created ? "created" : "updated"} ${written.path}`
-    // The plugin hot-applies before the CLI runs; report that instead of a
-    // misleading "not applied" note.
+    // A slash command's plugin hook may have hot-applied the table already.
     const marker = readApplyMarker()
     if (marker) {
-      detail += ` | ${marker}`
-      applied = true
+      detail += ` | ${marker.detail}`
+      applied = marker.ok
     } else if (opts.apply) {
-      const hot = await hotApply(table)
-      detail += hot.applied ? ` | hot-applied (${hot.detail})` : ` | ${hot.detail}`
-      applied = hot.applied
+      const patch = await patchServerConfig(table)
+      detail += patch.applied ? ` | hot-applied (${patch.detail})` : ` | ${patch.detail}`
+      applied = patch.applied
     }
   }
 
@@ -111,39 +146,38 @@ async function cmdRefresh(opts: CommonOpts): Promise<number> {
 }
 
 async function cmdStatus(opts: CommonOpts): Promise<number> {
-  const { table, cfg, scoreTable } = await buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog })
-  const scope = resolveScope(opts.scopeExplicit, opts.scope)
-  const ledger = new LedgerStore(ledgerFile(scope), () => Date.now())
-  const capFor = LedgerStore.capLookup(scoreTable, cfg.plan)
-
-  const usage: Record<string, { pct: number; label: string }> = {}
-  for (const entry of Object.values(table.active).flat()) {
-    const u = ledger.usage(entry.id, capFor(entry.id))
-    usage[entry.id] = { pct: u.pct5h * 100, label: `${(u.pct5h * 100).toFixed(0)}%` }
-  }
+  const result = await build(opts)
+  const ledger = new LedgerStore(ledgerFile())
+  const rows = statusRows(result, ledger)
 
   if (opts.json) {
-    process.stdout.write(JSON.stringify({ table, usage }, null, 2) + "\n")
+    const usage: Record<string, { pct: number }> = {}
+    for (const entry of activeEntries(result.table)) usage[entry.id] = { pct: usagePercent(result, ledger, entry.id) }
+    process.stdout.write(JSON.stringify({ table: result.table, rows, usage }, null, 2) + "\n")
   } else {
-    process.stdout.write(formatStatus(table, usage) + "\n")
+    process.stdout.write(formatStatus(result.table, rows) + "\n")
   }
   return 0
 }
 
-function ledgerFile(scope: "project" | "global"): string {
-  return scope === "global"
-    ? path.join(globalStateDir(), "ledger.json")
-    : path.join(projectStateDir(process.cwd()), "ledger.json")
-}
-
-function cmdPlan(profile: PlanProfile, scope: "project" | "global"): number {
-  const file = scope === "global" ? globalRouterConfigFile() : projectRouterConfigFile(process.cwd())
-  const existing = readJson<Record<string, unknown>>(file) ?? {}
-  const merged = mergeUserConfig(existing as never, { plan: profile } as never) as Record<string, unknown>
-  writeJson(file, merged)
+async function cmdPlan(profile: string | undefined, opts: CommonOpts): Promise<number> {
+  if (!isPlan(profile)) throw new UsageError(`plan must be one of ${PLAN_CHOICES}`)
+  const file = opts.scope === "global" ? globalRouterConfigFile() : projectRouterConfigFile(opts.cwd)
+  editJsonFile(file, [{ path: ["plan"], value: profile }])
   process.stdout.write(`Plan set to "${profile}" in ${file}\n`)
-  process.stdout.write("Run `opencode-router refresh` (or /refresh-routing) to rebuild the routing table.\n")
-  return 0
+
+  if (opts.scope === "global") {
+    const projectFile = projectRouterConfigFile(opts.cwd)
+    const projectPlan = readJson<{ plan?: unknown }>(projectFile)?.plan
+    if (projectPlan !== undefined && projectPlan !== profile) {
+      process.stdout.write(
+        `Note: ${projectFile} sets "plan": ${JSON.stringify(projectPlan)}, which overrides the global plan in this project.\n`,
+      )
+    }
+  }
+
+  process.stdout.write("\n")
+  return cmdRefresh({ ...opts, plan: undefined })
 }
 
 function cmdCat(catalog?: string): number {
@@ -154,80 +188,46 @@ function cmdCat(catalog?: string): number {
   return 0
 }
 
-export async function main(argv: string[]): Promise<number> {
-  const command = argv[0]
-  if (!command || command === "-h" || command === "--help" || command === "help") {
-    process.stdout.write(HELP)
-    return 0
-  }
-
-  if (command === "plan") {
-    const profile = argv[1]
-    if (!isPlan(profile)) {
-      process.stderr.write(`error: plan must be one of go | go-plus | free\n`)
-      return 2
-    }
-    const { values } = parseArgs({ args: argv.slice(2), options: { scope: { type: "string" } }, allowPositionals: true })
-    const scope = resolveScope(values.scope !== undefined, values.scope === "global" ? "global" : "project")
-    return cmdPlan(profile, scope)
-  }
-
-  // OpenCode substitutes $1 with an empty string when the user passes no
-  // arguments, which can leave an option without a value. Never crash on that:
-  // fall back to defaults so the command still produces its output.
-  let parsed
-  try {
-    parsed = parseArgs({
-      args: argv.slice(1),
-      options: {
-        plan: { type: "string" },
-        scope: { type: "string" },
-        catalog: { type: "string" },
-        "dry-run": { type: "boolean" },
-        "no-apply": { type: "boolean" },
-        json: { type: "boolean" },
-        verbose: { type: "boolean" },
-        help: { type: "boolean", short: "h" },
-      },
-      allowPositionals: true,
-    })
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error)
-    process.stderr.write(`opencode-router: ignoring bad arguments (${message})\n`)
-    parsed = { values: {}, positionals: [] }
-  }
-
-  const opts = commonOptions(parsed.values as Record<string, unknown>)
-
-  switch (command) {
-    case "refresh":
-      return cmdRefresh(opts)
-    case "status":
-      return cmdStatus(opts)
-    case "cat":
-      return cmdCat(opts.catalog)
-    case "install": {
-      const { installCommands } = await import("./install.js")
-      const result = installCommands(resolveScope(opts.scopeExplicit, opts.scope))
-      process.stdout.write(`Wrote ${result.files.length} command files to ${result.commandDir}\n`)
-      process.stdout.write(`Wrote starter config: ${result.configPath}\n`)
-      return 0
-    }
-    case "eval": {
-      const { runEval } = await import("./eval.js")
-      return runEval(opts)
-    }
-    default:
-      process.stderr.write(`error: unknown command "${command}"\n\n${HELP}`)
-      return 2
-  }
+function cmdInstall(opts: CommonOpts): number {
+  const result = installCommands(opts.scope, opts.cwd)
+  process.stdout.write(`Wrote ${result.files.length} command files to ${result.commandDir}\n`)
+  process.stdout.write(
+    result.configCreated ? `Wrote starter config: ${result.configPath}\n` : `Kept existing config: ${result.configPath}\n`,
+  )
+  return 0
 }
 
-main(process.argv.slice(2))
-  .then((code) => {
-    process.exitCode = code
-  })
-  .catch((error) => {
-    process.stderr.write(`opencode-router failed: ${error instanceof Error ? error.stack ?? error.message : String(error)}\n`)
-    process.exitCode = 1
-  })
+function usageError(error: Error): number {
+  process.stderr.write(`error: ${error.message}\n\nRun "opencode-router --help" for usage.\n`)
+  return 2
+}
+
+/** Run one CLI command. Returns the exit code; never exits the process. */
+export async function main(argv: string[], cwd: string = process.cwd()): Promise<number> {
+  try {
+    const { command, args, help, opts } = parseCommandLine(argv, cwd)
+    if (!command || command === "help" || help) {
+      process.stdout.write(HELP)
+      return 0
+    }
+    switch (command) {
+      case "refresh":
+        return await cmdRefresh(opts)
+      case "status":
+        return await cmdStatus(opts)
+      case "plan":
+        return await cmdPlan(args[0], opts)
+      case "cat":
+        return cmdCat(opts.catalog)
+      case "install":
+        return cmdInstall(opts)
+      case "eval":
+        return await runEval({ plan: opts.plan, catalog: opts.catalog, json: opts.json, projectDir: opts.cwd })
+      default:
+        throw new UsageError(`unknown command "${command}"`)
+    }
+  } catch (error) {
+    if (error instanceof UsageError) return usageError(error)
+    throw error
+  }
+}

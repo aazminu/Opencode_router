@@ -1,6 +1,7 @@
+import os from "node:os"
 import { describe, expect, it } from "vitest"
 import { globToRegex, matchesAny } from "../src/rank.js"
-import { stripJsonComments } from "../src/paths.js"
+import { globalConfigDir, parseJsonc } from "../src/paths.js"
 
 describe("globToRegex", () => {
   it("matches wildcards and dots", () => {
@@ -11,22 +12,32 @@ describe("globToRegex", () => {
   })
 })
 
-describe("stripJsonComments", () => {
-  it("removes line, block comments and trailing commas", () => {
+describe("parseJsonc", () => {
+  it("removes line comments, block comments, and trailing commas", () => {
     const input = `{
       // a comment
       "a": 1,
       /* block */
       "b": [1, 2,],
     }`
-    const parsed = JSON.parse(stripJsonComments(input)) as { a: number; b: number[] }
-    expect(parsed.a).toBe(1)
-    expect(parsed.b).toEqual([1, 2])
+    expect(parseJsonc(input).value).toEqual({ a: 1, b: [1, 2] })
   })
 
   it("keeps // inside strings", () => {
-    const input = `{ "url": "https://example.com//x" }`
-    const parsed = JSON.parse(stripJsonComments(input)) as { url: string }
-    expect(parsed.url).toBe("https://example.com//x")
+    expect(parseJsonc(`{ "url": "https://example.com//x" }`).value).toEqual({ url: "https://example.com//x" })
+  })
+
+  it("keeps ',}' inside strings", () => {
+    expect(parseJsonc(`{ "a": "x,}" }`).value).toEqual({ a: "x,}" })
+  })
+
+  it("reports the line of a JSON error", () => {
+    expect(parseJsonc(`{\n  "a": 1,\n  "b": }`).error).toMatch(/line 3/)
+  })
+})
+
+describe("test isolation", () => {
+  it("uses a temporary config folder", () => {
+    expect(globalConfigDir().startsWith(os.tmpdir())).toBe(true)
   })
 })

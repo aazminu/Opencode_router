@@ -61,8 +61,8 @@ Make sure that you have these items:
 
    If you already have `opencode.jsonc` in that folder, open that file. If Notepad asks
    to make a new file, click **Yes**.
-2. Make a backup copy of the file before you continue. The router writes to this file
-   (see [Known limits](#11-known-limits)).
+2. Make a backup copy of the file before you continue. The router writes the model keys
+   in this file. It keeps your comments and all other settings.
 3. Add `"@s-berdia/opencode-router"` to the `plugin` list. If the file is empty, use all
    of this text:
 
@@ -130,7 +130,8 @@ Use this option to test changes to the code.
 3. The router does these steps:
    1. It reads the model catalog and your settings.
    2. It gives a score to each model for each agent.
-   3. It writes the best models to the global `opencode.json`.
+   3. It writes the best models to the global `opencode.json`. It changes only the
+      `model`, `small_model`, and `agent.<role>.model` and `variant` keys.
    4. It applies the models to the running session.
    5. It shows the scorecard.
 
@@ -163,19 +164,17 @@ The **Notes** section under the table shows problems, for example a missing cata
 The router finds your plan from the models in your catalog. If it selects the wrong plan,
 set the plan:
 
-1. In OpenCode, type the command with your plan (`go`, `go-plus`, or `free`):
+In OpenCode, type the command with your plan (`go`, `go-plus`, or `free`):
 
-   ```text
-   /routing-plan go-plus
-   ```
+```text
+/routing-plan go-plus
+```
 
-2. Then type:
+The router saves the plan in `~/.config/opencode/router.config.json`, calculates the
+routing table again, and applies it. It then shows the new scorecard.
 
-   ```text
-   /refresh-routing
-   ```
-
-The router saves the plan in `~/.config/opencode/router.config.json`.
+If the `router.config.json` file of the current project also sets `plan`, that value wins
+in that project. The command shows a note when this occurs.
 
 ## 6. Change the router settings
 
@@ -187,7 +186,8 @@ The router works with no settings. To change its behavior, make or edit
 | `~/.config/opencode/router.config.json` | All projects |
 | `<project>/.opencode/router.config.json` | One project. Its values replace the global values |
 
-After each change, run `/refresh-routing`.
+After each change, run `/refresh-routing`. If a file has a JSON error, or a value that is
+not valid, the router ignores it and shows a note under the scorecard.
 
 Each example below is a complete file. To use more than one example, put all the keys in
 one JSON object.
@@ -262,8 +262,13 @@ Use this setting when you know that a model is better or worse than its score.
 
 ### Change the number of failover models or the reasoning level
 
+`chainDepth` sets the number of models in each failover list. The default is 4 for the
+agents and 3 for the internal helpers. A value under `roles.<role>` wins over the
+top-level value.
+
 ```json
 {
+  "chainDepth": 3,
   "roles": {
     "build": { "chainDepth": 2 },
     "plan": { "variant": "medium" }
@@ -341,16 +346,19 @@ These commands work in PowerShell, CMD, Git Bash, macOS, and Linux.
 
 | Command | What it does |
 | :-- | :-- |
-| `opencode-router refresh --dry-run` | Show the scorecard. Write nothing |
+| `opencode-router refresh --dry-run` | Show the scorecard. Do not write `opencode.json` |
 | `opencode-router refresh --dry-run --verbose` | Also show the source of each score |
 | `opencode-router refresh --scope global` | Write the routing table to the global `opencode.json` |
 | `opencode-router refresh --scope project` | Write the routing table to `opencode.json` in the current folder |
 | `opencode-router refresh --plan free` | Use the `free` profile for this run only |
 | `opencode-router refresh --json` | Print the result as JSON |
-| `opencode-router status --scope global` | Show the first model of each role and its 5-hour use |
-| `opencode-router plan go-plus --scope global` | Save the plan in the global settings |
+| `opencode-router status` | Show the model in use for each role (after failover) and its 5-hour use |
+| `opencode-router plan go-plus --scope global` | Save the plan in the global settings, then calculate and write the routing table |
 | `opencode-router cat` | Show the catalog path, its date, and the number of models |
-| `opencode-router install --scope global` | Write the slash commands as files in `~/.config/opencode/command/` |
+| `opencode-router install --scope global` | Write the slash commands as files in `~/.config/opencode/command/`. If `router.config.json` does not exist, it also writes an empty one |
+
+The terminal tool reads the global `router.config.json` and the project file of the
+current folder, in the same way as the plugin.
 
 If you do not give `--scope`, the tool uses `project` in a project folder (a folder with
 `.git`, `package.json`, `opencode.json`, `pyproject.toml`, `Cargo.toml`, or `go.mod`) and
@@ -410,7 +418,7 @@ is in [`evals/prompt.md`](./evals/prompt.md).
    npx @s-berdia/opencode-router eval --plan go
    ```
 
-4. Open `evals/report.md` in the current folder.
+4. Open the report: `~/.config/opencode/router/eval-report.md`.
 
 **Caution:** The test sends up to 4 real requests. Each request can use up to 2000
 output tokens of your quota.
@@ -427,15 +435,19 @@ The router writes these files:
 | `~/.config/opencode/router/ledger.json` | Plugin | Spend and tokens per model for 5 hours, 7 days, and 30 days, and cooldowns |
 | `~/.config/opencode/router/routing-table.json` | Plugin | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | Plugin | The result of the last live apply |
-| `~/.config/opencode/opencode.json` | `/refresh-routing` | `model`, `small_model`, and `agent.<role>.model` and `variant` |
-| `~/.config/opencode/router.config.json` | `/routing-plan` | Your router settings |
-| `evals/report.md` (current folder) | `/routing-eval` | The test report |
+| `~/.config/opencode/router/eval-report.md` | `/routing-eval` | The test report |
+| `~/.config/opencode/opencode.json` | `/refresh-routing`, `/routing-plan` | `model`, `small_model`, and `agent.<role>.model` and `variant` |
+| `~/.config/opencode/router.config.json` | `/routing-plan`, `install` (only if missing) | Your router settings |
+
+The router writes each file through a temporary file, so a crash cannot leave half a
+file. If `ledger.json` is damaged, the router keeps it as `ledger.json.corrupt-<time>`
+and starts a new one.
 
 If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in place of
 `~/.config/opencode`. If `XDG_CACHE_HOME` is set, the router reads the catalog from
 `$XDG_CACHE_HOME/opencode/models.json`.
 
-Do not commit the `router/` folder or `evals/report.md`. They contain your usage data.
+Do not commit the `router/` folder. It contains your usage data.
 
 ## 10. Troubleshooting
 
@@ -445,7 +457,8 @@ Do not commit the `router/` folder or `evals/report.md`. They contain your usage
 | The scorecard says "No models found" | The catalog file is missing | Start OpenCode and sign in. Then run `npx @s-berdia/opencode-router cat`. "Routed models" must be more than 0 |
 | A role shows `_no eligible model_` | Your settings removed all models for that role | Make `denyModels` and `allowModels` less strict. With `privacy.freeModelsOk: false` on the `free` plan, `plan` and `build` have no models |
 | A slash command shows an error that `node` is not found | Node.js is not on the `PATH` of OpenCode | Install Node.js 20 or later. Restart the computer or the terminal, then OpenCode |
-| `status` in a terminal shows 0% use | The terminal read the project ledger. The plugin writes the global ledger | Add `--scope global` |
+| "... has a JSON error (... at line N) ... The file was not changed." | Your `opencode.json` has a syntax error | Open the file, correct the line given, save, and run the command again |
+| A note says "router.config.json has a JSON error" | Your router settings file has a syntax error | Correct the line given. Until then, the router uses its default settings |
 | "live PATCH not attempted (no OPENCODE_SERVER_URL set)" | Normal when you run `refresh` in a terminal | No action. Or see [Apply to a running OpenCode server](#apply-to-a-running-opencode-server) |
 | "hot-apply failed: ..." | OpenCode did not accept the change | Restart OpenCode. The file `opencode.json` has the new models |
 | A model that you selected by hand changes back | The router selects the model at each message | See [Known limits](#11-known-limits) |
@@ -458,25 +471,17 @@ These are the limits of version 1.0.0.
 1. The router sets the model of the `plan`, `build`, `general`, and `explore` agents at
    each message. If you select a different model by hand, the router replaces it. To
    stop this, remove the plugin.
-2. `/refresh-routing` writes the global `opencode.json`. It removes comments from an
-   `opencode.jsonc` file. If the file has a JSON error, the router replaces the file, and
-   your other settings are lost. Keep a backup copy.
-3. `/refresh-routing go-plus` shows the scorecard for `go-plus`, but the router continues
-   to use your saved plan. To change the plan, use `/routing-plan`.
-4. The terminal tool reads only the global `router.config.json`. The project file applies
-   only in OpenCode.
-5. A top-level `chainDepth` key has no effect. Use `roles.<role>.chainDepth`.
-6. `install` replaces your `router.config.json`. Keep a backup copy.
-7. The internal helpers (`small_model`, `title`, `summary`, `compaction`) do not change
-   to a failover model.
-8. Use numbers are estimates. The router takes 20% of the monthly allowance as the
+2. The internal helpers (`small_model`, `title`, `summary`, `compaction`) do not change
+   to a failover model. They use the first model of their list.
+3. The slash commands always write the global files (`~/.config/opencode/`). To write the
+   files of one project, use the terminal tool with `--scope project`.
+4. The slash commands need Node.js 20 or later on the `PATH`.
+5. Use numbers are estimates. The router takes 20% of the monthly allowance as the
    5-hour limit. The 5-hour period starts at the first message after the last period
-   ended. Two OpenCode windows that run at the same time can overwrite each other's use
-   data.
-9. After a rate-limit error for the full session, all models go into a 1-hour cooldown.
-   During that time, the router uses the first model of each list.
-10. `/routing-status` shows the first model of each list. It does not show the failover
-    model that is in use.
+   ended. If two OpenCode windows write at the same moment, one record can be lost.
+6. After a rate-limit or quota error, the model goes into a 1-hour cooldown. A
+   rate-limit error for a full session puts only the model of that session into a
+   cooldown.
 
 ## 12. Remove the router
 

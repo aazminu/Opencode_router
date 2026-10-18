@@ -69,9 +69,9 @@ The router now selects models automatically. You do not have to do more.
 | Command | What it does |
 | :-- | :-- |
 | `/refresh-routing` | Calculate the routing table again, apply it, and show the scorecard |
-| `/routing-status` | Show the first model for each agent and its 5-hour quota use |
-| `/routing-plan go-plus` | Save a different plan profile (`go`, `go-plus`, or `free`). Then run `/refresh-routing` |
-| `/routing-eval` | Send one test prompt to the `build` models and write `evals/report.md` |
+| `/routing-status` | Show the model in use for each agent (after failover) and its 5-hour quota use |
+| `/routing-plan go-plus` | Save a plan profile (`go`, `go-plus`, or `free`) and apply it immediately |
+| `/routing-eval` | Send one test prompt to the `build` models and write a report |
 
 ### In a terminal
 
@@ -80,8 +80,8 @@ The package also has a command-line tool. Use it for scripts, CI, or scheduled j
 ```bash
 npx @s-berdia/opencode-router refresh --dry-run      # show the scorecard, write nothing
 npx @s-berdia/opencode-router refresh --plan go      # calculate and write opencode.json
-npx @s-berdia/opencode-router status --scope global  # active models and quota use
-npx @s-berdia/opencode-router plan go-plus           # save the plan profile
+npx @s-berdia/opencode-router status                 # models in use and quota use
+npx @s-berdia/opencode-router plan go-plus           # save the plan profile and rebuild
 npx @s-berdia/opencode-router cat                    # catalog file, date, model count
 npx @s-berdia/opencode-router install --scope global # write slash-command files
 npx @s-berdia/opencode-router --help                 # all commands and options
@@ -94,7 +94,7 @@ These commands work in PowerShell, CMD, Git Bash, and macOS or Linux shells.
 | `--plan <go\|go-plus\|free>` | Plan profile for this run |
 | `--scope <project\|global>` | Which `opencode.json` to write. Default: `project` in a project folder, else `global` |
 | `--catalog <file>` | Use a different `models.json` catalog file |
-| `--dry-run` | Do not write files |
+| `--dry-run` | Do not write `opencode.json` |
 | `--no-apply` | Write `opencode.json`, but do not send the change to a running server |
 | `--json` | Print JSON, not a table |
 | `--verbose` | Show the source of each score in the scorecard |
@@ -107,7 +107,8 @@ The router works with no configuration. To change its behavior, make a file name
 - Global (all projects): `~/.config/opencode/router.config.json`
 - One project: `<project>/.opencode/router.config.json`
 
-Values in the project file replace values in the global file.
+Values in the project file replace values in the global file. If a file has a JSON error
+or a value that is not valid, the router ignores it and shows a note in the scorecard.
 
 ```json
 {
@@ -124,6 +125,7 @@ Values in the project file replace values in the global file.
 | Key | Default | Meaning |
 | :-- | :-- | :-- |
 | `plan` | detected from your catalog | `go`, `go-plus`, or `free` |
+| `chainDepth` | 4 for agents, 3 for helpers | Number of models in each failover list. `roles.<role>.chainDepth` wins over it |
 | `softThreshold` | `0.85` | Change to the next model when 5-hour use reaches this part of the 5-hour limit (0.85 = 85%) |
 | `privacy.freeModelsOk` | `true` | `false` keeps `plan`, `build`, and `general` off free models |
 | `denyModels` | `[]` | Model IDs to never use. `*` and `?` wildcards are permitted |
@@ -165,7 +167,8 @@ score = w_intelligence * intelligence
 | `~/.config/opencode/router/ledger.json` | Spend and tokens per model for 5 hours, 7 days, and 30 days |
 | `~/.config/opencode/router/routing-table.json` | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | The result of the last live apply |
-| `opencode.json` (global, or the project file with `--scope project`) | `model`, `small_model`, and `agent.<role>.model` |
+| `~/.config/opencode/router/eval-report.md` | The report of the last `/routing-eval` |
+| `opencode.json` or `opencode.jsonc` (global, or the project file with `--scope project`) | `model`, `small_model`, and `agent.<role>.model` and `variant`. Comments and all other keys stay. A file with a JSON error is not changed |
 
 If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in place of
 `~/.config/opencode`. Do not commit the `router/` folder. It contains your usage data.

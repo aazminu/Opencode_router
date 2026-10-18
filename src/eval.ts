@@ -1,16 +1,18 @@
-import path from "node:path"
-import fs from "node:fs"
-import type { PlanProfile, RankingEntry, RoleName } from "./types.js"
+import type { PlanProfile, RankingEntry } from "./types.js"
 import { buildRoutingTable } from "./engine.js"
-import { ensureDir } from "./paths.js"
+import { writeTextAtomic } from "./paths.js"
+import { FIVE_HOUR_SHARE } from "./scoring.js"
+import { evalReportFile } from "./state.js"
 
 export interface EvalOptions {
   plan?: PlanProfile
   catalog?: string
   json?: boolean
-  role?: RoleName
-  limit?: number
+  projectDir?: string
 }
+
+const ROLE = "build"
+const CHAIN_LIMIT = 4
 
 const PROMPT = `In a fixture repo, build a CLI named \`todo\` with \`add\`, \`list\`, \`done <id>\`, and \`rm <id>\` subcommands backed by a JSON file. Include input validation, a \`--json\` output flag, and a test suite. Then fix any failing tests.`
 
@@ -87,29 +89,26 @@ async function callModel(entry: RankingEntry, apiKey: string): Promise<CallResul
 
 function estimateCost(entry: RankingEntry, inputTokens: number, outputTokens: number): number {
   // Rough: derived from the score table's blended cost when present.
-  const per1M = entry.tokensPer5h && entry.monthlyCapUSD ? (entry.monthlyCapUSD * 0.2) / entry.tokensPer5h : 1
+  const per1M = entry.tokensPer5h && entry.monthlyCapUSD ? (entry.monthlyCapUSD * FIVE_HOUR_SHARE) / entry.tokensPer5h : 1
   return ((inputTokens + outputTokens) / 1_000_000) * per1M
 }
 
 export async function runEval(opts: EvalOptions = {}): Promise<number> {
-  const role = (opts.role ?? "build") as RoleName
-  const limit = opts.limit ?? 4
-  const { table } = await buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog })
-  const chain = (table.active[role] ?? []).slice(0, limit)
+  const { table } = await buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog, projectDir: opts.projectDir })
+  const chain = (table.active[ROLE] ?? []).slice(0, CHAIN_LIMIT)
 
   if (chain.length === 0) {
-    process.stderr.write(`error: no candidate models for role "${role}"\n`)
+    process.stderr.write(`error: no candidate models for role "${ROLE}"\n`)
     return 1
   }
 
   const apiKey = process.env.OPENCODE_API_KEY
-  const outDir = path.join(process.cwd(), "evals")
-  ensureDir(outDir)
+  const reportPath = evalReportFile()
 
   const lines: string[] = []
   lines.push(`# opencode-router eval report`)
   lines.push("")
-  lines.push(`- Role: **${role}**`)
+  lines.push(`- Role: **${ROLE}**`)
   lines.push(`- Plan: **${table.plan}**`)
   lines.push(`- Generated: ${new Date().toISOString()}`)
   lines.push("")
@@ -130,9 +129,8 @@ export async function runEval(opts: EvalOptions = {}): Promise<number> {
     }
     lines.push("")
     lines.push("Set `OPENCODE_API_KEY` and re-run `opencode-router eval` to measure real latency, tokens, and pass rate.")
-    const reportPath = path.join(outDir, "report.md")
-    fs.writeFileSync(reportPath, lines.join("\n") + "\n", "utf8")
-    if (opts.json) process.stdout.write(JSON.stringify({ role, predicted: chain }, null, 2) + "\n")
+    writeTextAtomic(reportPath, lines.join("\n") + "\n")
+    if (opts.json) process.stdout.write(JSON.stringify({ role: ROLE, predicted: chain }, null, 2) + "\n")
     else process.stdout.write(`Wrote ${reportPath} (predicted only; set OPENCODE_API_KEY for live results)\n`)
     return 0
   }
@@ -165,9 +163,8 @@ export async function runEval(opts: EvalOptions = {}): Promise<number> {
   lines.push("")
   lines.push("Feed the measured ranks back into `model-scores.json` (or `router.config.json` -> `scores`) to tune accuracy.")
 
-  const reportPath = path.join(outDir, "report.md")
-  fs.writeFileSync(reportPath, lines.join("\n") + "\n", "utf8")
-  if (opts.json) process.stdout.write(JSON.stringify({ role, results }, null, 2) + "\n")
+  writeTextAtomic(reportPath, lines.join("\n") + "\n")
+  if (opts.json) process.stdout.write(JSON.stringify({ role: ROLE, results }, null, 2) + "\n")
   else process.stdout.write(`Wrote ${reportPath}\n`)
   return 0
 }

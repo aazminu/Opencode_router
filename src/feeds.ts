@@ -1,11 +1,9 @@
-import type { ResolvedConfig } from "./types.js"
+import type { MetricScores, ResolvedConfig } from "./types.js"
 import { emptyFeedScores, type FeedScores } from "./scoring.js"
 
-export interface FeedRecord {
+export interface FeedRecord extends MetricScores {
   id?: string
   family?: string
-  intelligence?: number
-  speed?: number
 }
 
 export interface FeedPayload {
@@ -33,7 +31,7 @@ export async function loadFeedScores(cfg: ResolvedConfig): Promise<{ feeds: Feed
 
     for (const rec of records) {
       if (!rec) continue
-      const value: { intelligence?: number; speed?: number } = {}
+      const value: MetricScores = {}
       if (typeof rec.intelligence === "number") value.intelligence = rec.intelligence
       if (typeof rec.speed === "number") value.speed = rec.speed
       if (value.intelligence === undefined && value.speed === undefined) continue

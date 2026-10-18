@@ -1,12 +1,16 @@
-import path from "node:path"
-import type { Ledger, LedgerModelState, PlanProfile, ScoreTable } from "./types.js"
-import { ensureDir, readJson, writeJson } from "./paths.js"
+import fs from "node:fs"
+import type { Ledger, LedgerModelState } from "./types.js"
+import { isPlainObject, readJsonFile, writeJson } from "./paths.js"
+import { FIVE_HOUR_SHARE } from "./scoring.js"
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
 export const WINDOW_5H = 5 * HOUR
 export const WINDOW_WEEK = 7 * DAY
 export const WINDOW_MONTH = 30 * DAY
+
+/** A model is unhealthy once it has used this share of its monthly allowance. */
+const MONTHLY_LIMIT = 0.95
 
 function emptyState(now: number): LedgerModelState {
   return {
@@ -22,9 +26,20 @@ function emptyState(now: number): LedgerModelState {
   }
 }
 
-function rollWindow(now: number): LedgerModelState {
-  const base = emptyState(now)
-  return base
+function emptyLedger(now: number): Ledger {
+  return { version: 1, updatedAt: new Date(now).toISOString(), models: {} }
+}
+
+function isLedger(value: unknown): value is Ledger {
+  return isPlainObject(value) && value.version === 1 && isPlainObject(value.models)
+}
+
+function mtimeOf(file: string): number {
+  try {
+    return fs.statSync(file).mtimeMs
+  } catch {
+    return -1
+  }
 }
 
 export interface ModelUsage {
@@ -37,20 +52,43 @@ export interface ModelUsage {
   cooldownUntil: number | null
 }
 
+/**
+ * Rolling spend per model, stored in one JSON file. Several OpenCode sessions
+ * can share the file: each call reloads it when another process changed it.
+ */
 export class LedgerStore {
   private data: Ledger
+  private loadedMtime = -1
 
-  constructor(private file: string, private now: () => number = Date.now) {
-    this.data = this.read()
+  constructor(
+    private readonly file: string,
+    private readonly now: () => number = Date.now,
+  ) {
+    this.data = this.load()
   }
 
-  private read(): Ledger {
-    const raw = readJson<Ledger>(this.file)
-    if (raw && raw.version === 1 && raw.models) return raw
-    return { version: 1, updatedAt: new Date(this.now()).toISOString(), models: {} }
+  /** Read the file. A corrupt file is kept as `<file>.corrupt-<time>` and a new ledger starts. */
+  private load(): Ledger {
+    this.loadedMtime = mtimeOf(this.file)
+    const result = readJsonFile(this.file)
+    if (result.status === "ok" && isLedger(result.value)) return result.value
+    if (result.status !== "absent") {
+      try {
+        fs.renameSync(this.file, `${this.file}.corrupt-${this.now()}`)
+      } catch {
+        /* keep going with an empty ledger */
+      }
+      this.loadedMtime = -1
+    }
+    return emptyLedger(this.now())
   }
 
-  private touch(state: LedgerModelState, now: number): LedgerModelState {
+  private sync(): void {
+    if (mtimeOf(this.file) !== this.loadedMtime) this.data = this.load()
+  }
+
+  /** Reset each window that has ended. */
+  private roll(state: LedgerModelState, now: number): LedgerModelState {
     if (now - state.window5hStart >= WINDOW_5H) {
       state.cost5h = 0
       state.tokens5h = 0
@@ -66,18 +104,18 @@ export class LedgerStore {
       state.tokensMonth = 0
       state.windowMonthStart = now
     }
-    if (now >= state.window5hStart + WINDOW_5H) state.window5hStart = now
     return state
   }
 
   private state(modelId: string): LedgerModelState {
+    this.sync()
     const now = this.now()
     let entry = this.data.models[modelId]
     if (!entry) {
-      entry = rollWindow(now)
+      entry = emptyState(now)
       this.data.models[modelId] = entry
     }
-    return this.touch(entry, now)
+    return this.roll(entry, now)
   }
 
   record(modelId: string, costUSD: number, tokens: number): void {
@@ -89,7 +127,6 @@ export class LedgerStore {
     state.tokensWeek += tokens
     state.tokensMonth += tokens
     state.lastUsedAt = this.now()
-    this.data.updatedAt = new Date(this.now()).toISOString()
     this.save()
   }
 
@@ -97,7 +134,6 @@ export class LedgerStore {
     const state = this.state(modelId)
     state.cooldownUntil = this.now() + durationMs
     if (reason) state.lastError = reason
-    this.data.updatedAt = new Date(this.now()).toISOString()
     this.save()
   }
 
@@ -108,28 +144,15 @@ export class LedgerStore {
   }
 
   usage(modelId: string, monthlyCapUSD: number | null): ModelUsage {
-    const state = this.state(modelId)
-    const cap5h = monthlyCapUSD === null ? null : monthlyCapUSD * 0.2
-    const pct5h = cap5h === null || cap5h <= 0 ? 0 : state.cost5h / cap5h
-    const pctMonth = monthlyCapUSD === null || monthlyCapUSD <= 0 ? 0 : state.costMonth / monthlyCapUSD
-    return {
-      cost5h: state.cost5h,
-      costMonth: state.costMonth,
-      tokens5h: state.tokens5h,
-      tokensMonth: state.tokensMonth,
-      pct5h,
-      pctMonth,
-      cooldownUntil: state.cooldownUntil ?? null,
-    }
+    return usageOf(this.state(modelId), monthlyCapUSD)
   }
 
-  /** Healthy = not cooling down and under the soft threshold on every window. */
+  /** Healthy = not cooling down, under the soft threshold for 5 hours, and under the monthly limit. */
   isHealthy(modelId: string, monthlyCapUSD: number | null, softThreshold: number): boolean {
-    const now = this.now()
     const state = this.state(modelId)
-    if (state.cooldownUntil && now < state.cooldownUntil) return false
-    const u = this.usage(modelId, monthlyCapUSD)
-    return u.pct5h < softThreshold && u.pctMonth < 0.95
+    if (state.cooldownUntil && this.now() < state.cooldownUntil) return false
+    const u = usageOf(state, monthlyCapUSD)
+    return u.pct5h < softThreshold && u.pctMonth < MONTHLY_LIMIT
   }
 
   snapshot(): Ledger {
@@ -137,16 +160,21 @@ export class LedgerStore {
   }
 
   save(): void {
-    ensureDir(path.dirname(this.file))
+    this.data.updatedAt = new Date(this.now()).toISOString()
     writeJson(this.file, this.data)
+    this.loadedMtime = mtimeOf(this.file)
   }
+}
 
-  static capLookup(table: ScoreTable, plan: PlanProfile) {
-    return (modelId: string): number | null => {
-      if (plan === "free") return null
-      const entry = table.monthlyCaps[modelId]
-      if (!entry) return null
-      return plan === "go-plus" ? entry.goPlus : entry.go
-    }
+function usageOf(state: LedgerModelState, monthlyCapUSD: number | null): ModelUsage {
+  const cap5h = monthlyCapUSD === null ? null : monthlyCapUSD * FIVE_HOUR_SHARE
+  return {
+    cost5h: state.cost5h,
+    costMonth: state.costMonth,
+    tokens5h: state.tokens5h,
+    tokensMonth: state.tokensMonth,
+    pct5h: cap5h === null || cap5h <= 0 ? 0 : state.cost5h / cap5h,
+    pctMonth: monthlyCapUSD === null || monthlyCapUSD <= 0 ? 0 : state.costMonth / monthlyCapUSD,
+    cooldownUntil: state.cooldownUntil ?? null,
   }
 }

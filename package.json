@@ -1,10 +1,18 @@
 {
-  "name": "opencode-router",
+  "name": "@s-berdia/opencode-router",
   "version": "1.0.0",
   "description": "Dynamic model routing for OpenCode Go / Go Plus / Free. Picks the best value-for-money model per agent (plan, build, general, explore) and rotates automatically so a 24/7 build plan never runs out.",
   "type": "module",
   "license": "MIT",
   "author": "s-berdia",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/s-berdia/Opencode_router.git"
+  },
+  "homepage": "https://github.com/s-berdia/Opencode_router#readme",
+  "bugs": {
+    "url": "https://github.com/s-berdia/Opencode_router/issues"
+  },
   "keywords": [
     "opencode",
     "opencode-plugin",
@@ -18,31 +26,31 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./cli": {
-      "types": "./dist/cli.d.ts",
-      "import": "./dist/cli.js"
     }
   },
   "bin": {
-    "opencode-router": "./dist/cli.js"
+    "opencode-router": "./dist/bin.js"
   },
   "files": [
     "dist",
     "model-scores.json",
     "README.md",
+    "USAGE.md",
     "LICENSE"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsup",
     "dev": "tsup --watch",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "refresh": "node dist/cli.js refresh",
-    "status": "node dist/cli.js status"
+    "prepublishOnly": "npm run typecheck && npm test && npm run build",
+    "refresh": "node dist/bin.js refresh",
+    "status": "node dist/bin.js status"
   },
-  "dependencies": {},
   "peerDependencies": {
     "@opencode-ai/plugin": ">=1.0.0"
   },
@@ -54,6 +62,7 @@
   "devDependencies": {
     "@opencode-ai/plugin": "^1.18.23",
     "@types/node": "^22.10.2",
+    "jsonc-parser": "^3.3.1",
     "tsup": "^8.3.5",
     "typescript": "^5.7.2",
     "vitest": "^2.1.8"

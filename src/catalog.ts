@@ -56,16 +56,19 @@ function toNumber(value: unknown, fallback = 0): number {
 function mapTiers(raw: RawModel): CostTier[] {
   const tiers = raw.cost?.tiers
   if (!Array.isArray(tiers)) return []
-  return tiers
-    .filter((t) => t && t.tier && typeof t.tier.size === "number")
-    .map((t) => ({
-      size: t.tier!.size as number,
+  const out: CostTier[] = []
+  for (const t of tiers) {
+    const size = t?.tier?.size
+    if (typeof size !== "number") continue
+    out.push({
+      size,
       input: toNumber(t.input),
       output: toNumber(t.output),
       cacheRead: t.cache_read !== undefined ? toNumber(t.cache_read) : undefined,
       cacheWrite: t.cache_write !== undefined ? toNumber(t.cache_write) : undefined,
-    }))
-    .sort((a, b) => a.size - b.size)
+    })
+  }
+  return out.sort((a, b) => a.size - b.size)
 }
 
 export function isFreeModel(cost: { input: number; output: number }, tiers: CostTier[]): boolean {
@@ -82,7 +85,8 @@ export function mapModel(providerID: string, raw: RawModel): CatalogModel {
     cacheWrite: raw.cost?.cache_write !== undefined ? toNumber(raw.cost.cache_write) : undefined,
   }
   const tiers = mapTiers(raw)
-  const inputModalities = Array.isArray(raw.modalities?.input) ? raw.modalities!.input!.map(String) : ["text"]
+  const rawInputs = raw.modalities?.input
+  const inputModalities = Array.isArray(rawInputs) ? rawInputs.map(String) : ["text"]
   return {
     providerID,
     modelID: raw.id,
@@ -117,9 +121,8 @@ export function loadCatalog(file: string = catalogCacheFile()): CatalogModel[] {
   for (const providerID of ROUTED_PROVIDERS) {
     const provider = raw[providerID]
     if (!provider?.models) continue
-    for (const key of Object.keys(provider.models)) {
-      const raws = provider.models[key]!
-      out.push(mapModel(providerID, raws))
+    for (const rawModel of Object.values(provider.models)) {
+      if (rawModel && typeof rawModel.id === "string") out.push(mapModel(providerID, rawModel))
     }
   }
   return out

@@ -1,0 +1,37 @@
+import { fileURLToPath } from "node:url"
+
+export interface SlashCommand {
+  name: string
+  description: string
+  /** CLI arguments; OpenCode replaces $1 with the first word the user types. */
+  args: string
+}
+
+/** The slash commands, shared by the plugin and `opencode-router install`. */
+export const SLASH_COMMANDS: readonly SlashCommand[] = [
+  { name: "refresh-routing", description: "Recompute and apply OpenCode model routing", args: "refresh" },
+  { name: "routing-status", description: "Show the model in use per role and its 5-hour quota use", args: "status" },
+  { name: "routing-plan", description: "Switch the routing plan (go | go-plus | free) and rebuild", args: "plan $1" },
+  { name: "routing-eval", description: "Run the router scoring stress test", args: "eval" },
+]
+
+/** Absolute path of the CLI script that ships next to this module in dist/. */
+function cliScriptPath(): string {
+  return fileURLToPath(new URL("./bin.js", import.meta.url)).replace(/\\/g, "/")
+}
+
+/** Command body. OpenCode runs the !`...` part and puts its output in the prompt. */
+export function commandTemplate(args: string): string {
+  return [
+    "opencode-router already ran. Its output is between the markers below.",
+    "",
+    "Rules:",
+    "1. Do not run any command, script, or tool. Do not search for opencode-router on PATH.",
+    "2. Present the text between the markers to the user exactly as written.",
+    "3. Do not summarize, reformat, shorten, or reorganize it.",
+    "",
+    "---BEGIN ROUTER OUTPUT---",
+    `!\`node "${cliScriptPath()}" ${args} --scope global\``,
+    "---END ROUTER OUTPUT---",
+  ].join("\n")
+}

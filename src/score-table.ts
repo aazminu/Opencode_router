@@ -1,49 +1,44 @@
 import bundled from "../model-scores.json" with { type: "json" }
+import { ROLE_NAMES } from "./types.js"
 import type { RoleSpec, RouterUserConfig, ScoreTable } from "./types.js"
 
-/** The committed default table, loaded from model-scores.json at build time. */
+const DEFAULT_TABLE: ScoreTable = bundled
+
+/** A fresh copy of the committed default table (model-scores.json, bundled at build time). */
 export function loadDefaultTable(): ScoreTable {
-  return bundled as unknown as ScoreTable
+  return structuredClone(DEFAULT_TABLE)
 }
 
-function deepMergeRole(base: RoleSpec, override: Partial<RoleSpec>): RoleSpec {
+function mergeRole(base: RoleSpec, override: Partial<RoleSpec>): RoleSpec {
   return {
     ...base,
     ...override,
-    weights: { ...base.weights, ...(override.weights ?? {}) },
-    requires: { ...base.requires, ...(override.requires ?? {}) },
+    weights: { ...base.weights, ...override.weights },
+    requires: { ...base.requires, ...override.requires },
   }
 }
 
 /**
  * Build the effective score table: committed defaults, then user overrides from
- * router.config.json (per-role weights/specs and per-model scores).
+ * router.config.json. A top-level `chainDepth` applies to every role, and a
+ * per-role value wins over it. Roles the router does not know are ignored.
  */
 export function resolveTable(user: RouterUserConfig): ScoreTable {
-  const table = structuredClone(loadDefaultTable())
+  const table = loadDefaultTable()
 
-  if (user.roles) {
-    for (const [role, spec] of Object.entries(user.roles)) {
-      if (!spec) continue
-      const base = table.roles[role] ?? ({} as RoleSpec)
-      table.roles[role] = deepMergeRole(base, spec)
-    }
+  for (const role of ROLE_NAMES) {
+    let spec = table.roles[role]
+    if (!spec) continue
+    if (user.chainDepth !== undefined) spec = { ...spec, chainDepth: user.chainDepth }
+    const override = user.roles?.[role]
+    if (override) spec = mergeRole(spec, override)
+    const weights = user.weights?.[role]
+    if (weights) spec = { ...spec, weights: { ...spec.weights, ...weights } }
+    table.roles[role] = spec
   }
 
-  if (user.weights) {
-    for (const [role, weights] of Object.entries(user.weights)) {
-      if (!weights) continue
-      const base = table.roles[role]
-      if (!base) continue
-      base.weights = { ...base.weights, ...weights }
-    }
-  }
-
-  if (user.scores) {
-    for (const [id, score] of Object.entries(user.scores)) {
-      if (!score) continue
-      table.models[id] = { ...(table.models[id] ?? {}), ...score }
-    }
+  for (const [id, score] of Object.entries(user.scores ?? {})) {
+    table.models[id] = { ...table.models[id], ...score }
   }
 
   return table

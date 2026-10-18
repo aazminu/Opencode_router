@@ -61,4 +61,22 @@ describe("LedgerStore", () => {
     const reopened = new LedgerStore(file, () => now)
     expect(reopened.usage("opencode-go/x", 80).cost5h).toBeCloseTo(1, 5)
   })
+
+  it("keeps the records of two stores that share one file", () => {
+    const file = tmpFile()
+    const now = 1_000_000
+    const first = new LedgerStore(file, () => now)
+    const second = new LedgerStore(file, () => now)
+    first.record("opencode-go/x", 1, 10)
+    second.record("opencode-go/x", 2, 20)
+    expect(new LedgerStore(file, () => now).usage("opencode-go/x", 80).cost5h).toBeCloseTo(3, 5)
+  })
+
+  it("keeps a copy of a corrupt ledger file", () => {
+    const file = tmpFile()
+    fs.writeFileSync(file, "{ not json", "utf8")
+    new LedgerStore(file, () => 1_000_000).record("opencode-go/x", 1, 10)
+    const copies = fs.readdirSync(path.dirname(file)).filter((name) => name.startsWith("ledger.json.corrupt"))
+    expect(copies).toHaveLength(1)
+  })
 })

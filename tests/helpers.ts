@@ -1,3 +1,5 @@
+import fs from "node:fs"
+import path from "node:path"
 import type { CatalogModel } from "../src/types.js"
 
 export function model(partial: Partial<CatalogModel> & { providerID: string; modelID: string }): CatalogModel {
@@ -61,3 +63,132 @@ export const sampleCatalog: CatalogModel[] = [
     limit: { context: 8000, output: 2000 },
   }),
 ]
+
+interface RawSpec {
+  family: string
+  cost: [input: number, output: number]
+  context?: number
+}
+
+/** Real model ids from model-scores.json, so every role gets an eligible chain. */
+const RAW_MODELS: Record<string, Record<string, RawSpec>> = {
+  "opencode-go": {
+    "glm-5.3-flash": { family: "glm-flash", cost: [0.3, 1.2], context: 1000000 },
+    "deepseek-v4.1-flash": { family: "deepseek-flash", cost: [0.2, 0.8], context: 1000000 },
+    "kimi-k3": { family: "kimi", cost: [2, 8], context: 256000 },
+    "qwen3.8-flash": { family: "qwen-flash", cost: [0.4, 1.6], context: 256000 },
+  },
+  opencode: {
+    "nemotron-3.5-lightning-free": { family: "nemotron", cost: [0, 0], context: 1000000 },
+    "beam-free": { family: "beam", cost: [0, 0], context: 262144 },
+  },
+}
+
+function rawCatalog(): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [providerID, models] of Object.entries(RAW_MODELS)) {
+    const rawModels: Record<string, unknown> = {}
+    for (const [id, spec] of Object.entries(models)) {
+      rawModels[id] = {
+        id,
+        name: id,
+        family: spec.family,
+        reasoning: true,
+        tool_call: true,
+        attachment: false,
+        open_weights: true,
+        limit: { context: spec.context ?? 200000, output: 64000 },
+        cost: { input: spec.cost[0], output: spec.cost[1], cache_read: 0 },
+        modalities: { input: ["text"], output: ["text"] },
+      }
+    }
+    out[providerID] = { id: providerID, name: providerID, models: rawModels }
+  }
+  return out
+}
+
+/** Write the fixture catalog where OpenCode keeps it (XDG_CACHE_HOME is a temp dir in tests). */
+export function writeCatalog(): string {
+  const file = path.join(process.env.XDG_CACHE_HOME!, "opencode", "models.json")
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, JSON.stringify(rawCatalog()), "utf8")
+  return file
+}
+
+/** The fixture catalog as mapped models, for tests that call the engine directly. */
+export function routedCatalog(): CatalogModel[] {
+  const out: CatalogModel[] = []
+  for (const [providerID, models] of Object.entries(RAW_MODELS)) {
+    for (const [modelID, spec] of Object.entries(models)) {
+      out.push(
+        model({
+          providerID,
+          modelID,
+          family: spec.family,
+          limit: { context: spec.context ?? 200000, output: 64000 },
+          cost: { input: spec.cost[0], output: spec.cost[1], cacheRead: 0 },
+          free: spec.cost[0] === 0 && spec.cost[1] === 0,
+        }),
+      )
+    }
+  }
+  return out
+}
+
+/** A temp folder that looks like a project (has a .git marker). */
+export function makeProject(): string {
+  const dir = path.join(process.env.XDG_CONFIG_HOME!, "..", "project")
+  fs.mkdirSync(path.join(dir, ".git"), { recursive: true })
+  return path.resolve(dir)
+}
+
+export function globalOpencodeDir(): string {
+  return path.join(process.env.XDG_CONFIG_HOME!, "opencode")
+}
+
+export function readJsonFile<T = Record<string, unknown>>(file: string): T {
+  return JSON.parse(fs.readFileSync(file, "utf8")) as T
+}
+
+/** Minimal PluginInput for the plugin factory; `updates` collects config.update calls. */
+export function stubInput(dir: string, updates: unknown[] = []) {
+  return {
+    client: {
+      config: {
+        update: async (arg: unknown) => {
+          updates.push(arg)
+          return { data: {} }
+        },
+      },
+    },
+    project: { id: "p", worktree: dir, time: { created: 0 } },
+    directory: dir,
+    worktree: dir,
+    experimental_workspace: { register() {} },
+    serverUrl: new URL("http://127.0.0.1:0"),
+    $: (async () => ({})) as unknown,
+  } as never
+}
+
+/** Capture stdout and stderr writes while `fn` runs. */
+export async function captureOutput(fn: () => Promise<unknown>): Promise<{ stdout: string; stderr: string; result: unknown }> {
+  let stdout = ""
+  let stderr = ""
+  const out = process.stdout.write.bind(process.stdout)
+  const err = process.stderr.write.bind(process.stderr)
+  process.stdout.write = ((chunk: string | Uint8Array) => {
+    stdout += String(chunk)
+    return true
+  }) as typeof process.stdout.write
+  process.stderr.write = ((chunk: string | Uint8Array) => {
+    stderr += String(chunk)
+    return true
+  }) as typeof process.stderr.write
+  try {
+    const result = await fn()
+    return { stdout, stderr, result }
+  } finally {
+    process.stdout.write = out
+    process.stderr.write = err
+  }
+}

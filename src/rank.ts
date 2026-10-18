@@ -1,13 +1,4 @@
-import type {
-  CatalogModel,
-  PlanProfile,
-  RankingEntry,
-  ResolvedConfig,
-  RoleName,
-  RoleSpec,
-  ScoreTable,
-  ScoredModel,
-} from "./types.js"
+import type { CatalogModel, PlanProfile, RankingEntry, ResolvedConfig, RoleName, RoleSpec, ScoreTable, ScoredModel } from "./types.js"
 import { modelClass, scoreModel, type FeedScores } from "./scoring.js"
 
 export function globToRegex(glob: string): RegExp {
@@ -127,18 +118,4 @@ export function rankRole(
 function round(value: number, digits = 1): number {
   const f = Math.pow(10, digits)
   return Math.round(value * f) / f
-}
-
-export function rankAllRoles(
-  catalog: CatalogModel[],
-  table: ScoreTable,
-  cfg: ResolvedConfig,
-  feeds: FeedScores,
-): Record<RoleName, RankingEntry[]> {
-  const roles = Object.keys(table.roles) as RoleName[]
-  const out = {} as Record<RoleName, RankingEntry[]>
-  for (const role of roles) {
-    out[role] = rankRole(catalog, role, table, cfg, feeds)
-  }
-  return out
 }

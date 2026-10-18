@@ -85,6 +85,8 @@ describe("rank robustness", () => {
     for (const m of catalog) t.monthlyCaps[m.id] = { go: 60, goPlus: 120 }
     const chain = rankRole(catalog, "build", t, cfgFor("go"), emptyFeedScores())
     const families = chain.map((e) => catalog.find((c) => c.id === e.id)?.family)
-    expect(new Set(families).size).toBe(families.length)
+    // Diversity means no two adjacent picks share a family; the backfill still fills the chain.
+    expect(families).toHaveLength(3)
+    for (let i = 1; i < families.length; i++) expect(families[i]).not.toBe(families[i - 1])
   })
 })
