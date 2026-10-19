@@ -200,10 +200,22 @@ export interface LedgerModelState {
   lastUsedAt?: number
 }
 
+/**
+ * The Go usage allowance. All subscription models share it: a message adds its
+ * cost divided by the monthly limit of its model.
+ */
+export interface LedgerAllowance {
+  /** [start of the hour in ms, share of the monthly allowance used in that hour] */
+  buckets: Array<[number, number]>
+  cooldownUntil?: number
+  lastError?: string
+}
+
 export interface Ledger {
   version: number
   updatedAt: string
   models: Record<string, LedgerModelState>
+  allowance?: LedgerAllowance
 }
 
 export interface MonthlyCap {

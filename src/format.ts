@@ -1,6 +1,7 @@
 import { ROLE_NAMES } from "./types.js"
 import type { RankingEntry, RoutingTable } from "./types.js"
 import type { StatusRow } from "./engine.js"
+import type { AllowanceUsage } from "./ledger.js"
 
 function fmtTokens(value: number | null): string {
   if (value === null) return "unlimited"
@@ -26,6 +27,11 @@ export function formatScorecard(table: RoutingTable, opts: { verbose?: boolean }
   lines.push(`- Plan: **${table.plan}**`)
   lines.push(`- Updated: ${when} (UTC)`)
   lines.push(`- Legend: go = Go subscription, free* = $0 (data may be collected), paid = Zen pay-as-you-go`)
+  if (table.plan !== "free") {
+    lines.push(
+      "- All `go` models share one usage allowance. When it is near its limit, each agent uses the free model at the end of its list.",
+    )
+  }
   lines.push("")
   lines.push("| Role | # | Model | Var | Score | Intel | Speed | Endur | Tokens/5h | Cap/mo | Class |")
   lines.push("| :-- | --: | :-- | :-- | --: | --: | --: | --: | --: | --: | :-- |")
@@ -63,23 +69,46 @@ export function formatScorecard(table: RoutingTable, opts: { verbose?: boolean }
   return lines.join("\n")
 }
 
-export function formatStatus(table: RoutingTable, rows: StatusRow[]): string {
+function percent(part: number): string {
+  return `${(part * 100).toFixed(0)}%`
+}
+
+/** The shared Go allowance; omitted on the free plan. */
+export interface AllowanceStatus {
+  usage: AllowanceUsage
+  softThreshold: number
+}
+
+export function formatStatus(table: RoutingTable, rows: StatusRow[], allowance?: AllowanceStatus): string {
   const lines: string[] = []
   lines.push(`## opencode-router status`)
   lines.push("")
   lines.push(`- Plan: **${table.plan}**`)
+  if (allowance) {
+    const { usage } = allowance
+    lines.push(
+      `- Go allowance used (estimate): 5 hours ${percent(usage.pct5h)}, 7 days ${percent(usage.pctWeek)}, 30 days ${percent(usage.pctMonth)}`,
+    )
+    if (usage.cooldownUntil !== null) {
+      const until = new Date(usage.cooldownUntil).toISOString().slice(11, 16)
+      lines.push(`- Go allowance cooldown until ${until} UTC (${usage.cooldownReason ?? "usage limit"})`)
+    }
+  }
+  const freeFallback = allowance
+    ? `free-fallback = a free model, because the Go allowance is at ${percent(allowance.softThreshold)} or more or in cooldown; `
+    : ""
   lines.push(
-    `- State: healthy = first model; failover = a later model, because the first is limited; limited = the model in use is near its limit or in cooldown`,
+    `- State: healthy = first model; failover = a later model, because an earlier model is in cooldown; ${freeFallback}limited = no usable model`,
   )
   lines.push("")
-  lines.push("| Role | Model in use | Rank | Usage (5h) | State |")
-  lines.push("| :-- | :-- | --: | --: | :-- |")
+  lines.push("| Role | Model in use | Rank | State |")
+  lines.push("| :-- | :-- | --: | :-- |")
   for (const row of rows) {
     if (!row.entry) {
-      lines.push(`| ${row.role} | _none_ | - | - | - |`)
+      lines.push(`| ${row.role} | _none_ | - | - |`)
       continue
     }
-    lines.push(`| ${row.role} | \`${row.entry.id}\` | ${row.entry.rank} | ${row.pct5h.toFixed(0)}% | ${row.state} |`)
+    lines.push(`| ${row.role} | \`${row.entry.id}\` | ${row.entry.rank} | ${row.state} |`)
   }
   return lines.join("\n")
 }

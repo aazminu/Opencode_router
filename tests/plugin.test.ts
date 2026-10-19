@@ -6,6 +6,32 @@ import { globalOpencodeDir, makeProject, readJsonFile, stubInput, stubRegistry, 
 
 interface LedgerFile {
   models: Record<string, { cooldownUntil?: number }>
+  allowance?: { buckets: Array<[number, number]>; cooldownUntil?: number }
+}
+
+/** A completed assistant message on an OpenCode Go model. */
+function goMessage(id: string, modelID: string, cost: number) {
+  return {
+    event: {
+      type: "message.updated",
+      properties: {
+        info: {
+          id,
+          sessionID: "s1",
+          role: "assistant",
+          providerID: "opencode-go",
+          modelID,
+          time: { created: 1, completed: 2 },
+          tokens: { input: 1000, output: 100, cache: { read: 0, write: 0 } },
+          cost,
+        },
+      },
+    },
+  } as never
+}
+
+function buildPrompt(): { message: { agent: string; model?: { providerID: string; modelID: string } }; parts: [] } {
+  return { message: { agent: "build" }, parts: [] }
 }
 
 function ledgerFile(): string {
@@ -107,6 +133,37 @@ describe("plugin failover", () => {
       .filter(([, state]) => state.cooldownUntil)
       .map(([id]) => id)
     expect(cooled).toEqual([used])
+  })
+
+  it("adds the allowance share of a subscription model to the ledger", async () => {
+    writeCatalog()
+    const hooks = await OpencodeRouter(stubInput(makeProject()))
+
+    // glm-5.3-flash has a monthly limit of $60 on Go, so $6 is 10% of the allowance.
+    await hooks.event!(goMessage("m1", "glm-5.3-flash", 6))
+
+    const ledger = readJsonFile<LedgerFile>(ledgerFile())
+    expect(ledger.allowance?.buckets[0]?.[1]).toBeCloseTo(0.1, 5)
+  })
+
+  it("moves build to its free model after a usage-limit error", async () => {
+    writeCatalog()
+    const hooks = await OpencodeRouter(stubInput(makeProject()))
+    const first = buildPrompt()
+    await hooks["chat.message"]!({ sessionID: "s1", agent: "build" }, first as never)
+    expect(first.message.model?.providerID).toBe("opencode-go")
+
+    await hooks.event!({
+      event: {
+        type: "session.error",
+        properties: { sessionID: "s1", error: { name: "APIError", data: { statusCode: 429, message: "Usage limit reached" } } },
+      },
+    } as never)
+    const next = buildPrompt()
+    await hooks["chat.message"]!({ sessionID: "s1", agent: "build" }, next as never)
+
+    expect(next.message.model?.modelID).toMatch(/-free$/)
+    expect(readJsonFile<LedgerFile>(ledgerFile()).allowance?.cooldownUntil).toBeGreaterThan(Date.now())
   })
 
   it("does not cool down a model after a plain bad-request error", async () => {

@@ -4,6 +4,8 @@ import os from "node:os"
 import path from "node:path"
 import { LedgerStore } from "../src/ledger.js"
 
+const HOUR = 60 * 60 * 1000
+const DAY = 24 * HOUR
 const files: string[] = []
 
 function tmpFile(): string {
@@ -16,60 +18,32 @@ afterEach(() => {
   for (const dir of files.splice(0)) fs.rmSync(dir, { recursive: true, force: true })
 })
 
-describe("LedgerStore", () => {
-  it("tracks spend and computes 5h percentage against a 20% cap", () => {
-    let now = 1_000_000
-    const store = new LedgerStore(tmpFile(), () => now)
+describe("LedgerStore spend", () => {
+  it("tracks spend and tokens per model", () => {
+    const store = new LedgerStore(tmpFile(), () => 1_000_000)
     store.record("opencode-go/x", 3, 1_000_000)
-    const u = store.usage("opencode-go/x", 15)
-    // cap 15 -> 5h cap 3 -> 100%
-    expect(u.pct5h).toBeCloseTo(1, 5)
-    expect(u.pctMonth).toBeCloseTo(0.2, 5)
-  })
-
-  it("marks a model unhealthy once past the soft threshold", () => {
-    const now = 1_000_000
-    const store = new LedgerStore(tmpFile(), () => now)
-    store.record("opencode-go/x", 2.7, 1)
-    expect(store.isHealthy("opencode-go/x", 15, 0.85)).toBe(false)
-    expect(store.isHealthy("opencode-go/x", 80, 0.85)).toBe(true)
-  })
-
-  it("rolls the 5h window but keeps the monthly bucket", () => {
-    let now = 1_000_000
-    const store = new LedgerStore(tmpFile(), () => now)
-    store.record("opencode-go/x", 5, 10)
-    now += 6 * 60 * 60 * 1000
-    const u = store.usage("opencode-go/x", 80)
-    expect(u.cost5h).toBe(0)
-    expect(u.costMonth).toBeCloseTo(5, 5)
-  })
-
-  it("applies and clears cooldowns", () => {
-    let now = 1_000_000
-    const store = new LedgerStore(tmpFile(), () => now)
-    store.cooldown("opencode-go/x", 60_000, "rate limit")
-    expect(store.isHealthy("opencode-go/x", 80, 0.85)).toBe(false)
-    now += 61_000
-    expect(store.isHealthy("opencode-go/x", 80, 0.85)).toBe(true)
+    expect(store.usage("opencode-go/x")).toMatchObject({ cost5h: 3, costMonth: 3, tokens5h: 1_000_000 })
   })
 
   it("persists across instances", () => {
     const file = tmpFile()
-    let now = 1_000_000
-    new LedgerStore(file, () => now).record("opencode-go/x", 1, 100)
+    const now = 10 * DAY
+    new LedgerStore(file, () => now).record("opencode-go/x", 1, 100, 0.1)
     const reopened = new LedgerStore(file, () => now)
-    expect(reopened.usage("opencode-go/x", 80).cost5h).toBeCloseTo(1, 5)
+    expect(reopened.usage("opencode-go/x").cost5h).toBeCloseTo(1, 5)
+    expect(reopened.allowance().pct5h).toBeCloseTo(0.5, 5)
   })
 
   it("keeps the records of two stores that share one file", () => {
     const file = tmpFile()
-    const now = 1_000_000
+    const now = 10 * DAY
     const first = new LedgerStore(file, () => now)
     const second = new LedgerStore(file, () => now)
-    first.record("opencode-go/x", 1, 10)
-    second.record("opencode-go/x", 2, 20)
-    expect(new LedgerStore(file, () => now).usage("opencode-go/x", 80).cost5h).toBeCloseTo(3, 5)
+    first.record("opencode-go/x", 1, 10, 0.02)
+    second.record("opencode-go/x", 2, 20, 0.04)
+    const reopened = new LedgerStore(file, () => now)
+    expect(reopened.usage("opencode-go/x").cost5h).toBeCloseTo(3, 5)
+    expect(reopened.allowance().pct5h).toBeCloseTo(0.3, 5)
   })
 
   it("keeps a copy of a corrupt ledger file", () => {
@@ -78,5 +52,101 @@ describe("LedgerStore", () => {
     new LedgerStore(file, () => 1_000_000).record("opencode-go/x", 1, 10)
     const copies = fs.readdirSync(path.dirname(file)).filter((name) => name.startsWith("ledger.json.corrupt"))
     expect(copies).toHaveLength(1)
+  })
+})
+
+describe("LedgerStore shared Go allowance", () => {
+  it("adds the share of every model to one allowance", () => {
+    const store = new LedgerStore(tmpFile(), () => 10 * DAY)
+    store.record("opencode-go/x", 6, 10, 0.1)
+    store.record("opencode-go/y", 1, 10, 0.05)
+
+    const allowance = store.allowance()
+
+    // 5 hours = 20% of the month, 7 days = 50%.
+    expect(allowance.pct5h).toBeCloseTo(0.75, 5)
+    expect(allowance.pctWeek).toBeCloseTo(0.3, 5)
+    expect(allowance.pctMonth).toBeCloseTo(0.15, 5)
+  })
+
+  it("is not available once the 5-hour use reaches the soft threshold", () => {
+    const store = new LedgerStore(tmpFile(), () => 10 * DAY)
+    store.record("opencode-go/x", 1, 10, 0.16)
+    expect(store.allowanceAvailable(0.85)).toBe(true)
+    store.record("opencode-go/x", 1, 10, 0.01)
+    expect(store.allowanceAvailable(0.85)).toBe(false)
+  })
+
+  it("is not available once the 7-day use reaches the soft threshold", () => {
+    let now = 10 * DAY
+    const store = new LedgerStore(tmpFile(), () => now)
+    for (let i = 0; i < 3; i++) {
+      store.record("opencode-go/x", 1, 10, 0.15)
+      now += 6 * HOUR
+    }
+    // 0.45 of the month in 18 hours: 90% of the 7-day allowance, 0% of the last 5 hours.
+    expect(store.allowance().pct5h).toBe(0)
+    expect(store.allowanceAvailable(0.85)).toBe(false)
+  })
+
+  it("drops use older than 5 hours from the 5-hour window only", () => {
+    let now = 10 * DAY
+    const store = new LedgerStore(tmpFile(), () => now)
+    store.record("opencode-go/x", 1, 10, 0.1)
+    now += 6 * HOUR
+
+    const allowance = store.allowance()
+
+    expect(allowance.pct5h).toBe(0)
+    expect(allowance.pctWeek).toBeCloseTo(0.2, 5)
+    expect(allowance.pctMonth).toBeCloseTo(0.1, 5)
+  })
+
+  it("counts the part of an hour that is still in the window", () => {
+    let now = 10 * DAY
+    const store = new LedgerStore(tmpFile(), () => now)
+    store.record("opencode-go/x", 1, 10, 0.1)
+    now += 5.5 * HOUR
+    // Half of the recorded hour is inside the last 5 hours.
+    expect(store.allowance().pct5h).toBeCloseTo(0.25, 5)
+  })
+
+  it("ignores records without a share", () => {
+    const store = new LedgerStore(tmpFile(), () => 10 * DAY)
+    store.record("opencode/free-fast", 0, 10)
+    expect(store.allowance()).toMatchObject({ pct5h: 0, pctWeek: 0, pctMonth: 0 })
+  })
+
+  it("keeps 30 days of records", () => {
+    let now = 10 * DAY
+    const file = tmpFile()
+    const store = new LedgerStore(file, () => now)
+    store.record("opencode-go/x", 1, 10, 0.1)
+    now += 31 * DAY
+    store.record("opencode-go/x", 1, 10, 0.1)
+    expect(store.allowance().pctMonth).toBeCloseTo(0.1, 5)
+    expect(store.snapshot().allowance?.buckets).toHaveLength(1)
+  })
+
+  it("applies and clears an allowance cooldown", () => {
+    let now = 10 * DAY
+    const store = new LedgerStore(tmpFile(), () => now)
+    store.cooldownAllowance(60_000, "usage limit")
+    expect(store.allowanceAvailable(0.85)).toBe(false)
+    expect(store.allowance().cooldownUntil).toBe(now + 60_000)
+    now += 61_000
+    expect(store.allowanceAvailable(0.85)).toBe(true)
+  })
+})
+
+describe("LedgerStore model cooldowns", () => {
+  it("applies and clears a cooldown for one model", () => {
+    let now = 1_000_000
+    const store = new LedgerStore(tmpFile(), () => now)
+    store.cooldown("opencode-go/x", 60_000, "rate limit")
+    expect(store.inCooldown("opencode-go/x")).toBe(true)
+    expect(store.inCooldown("opencode-go/y")).toBe(false)
+    now += 61_000
+    expect(store.inCooldown("opencode-go/x")).toBe(false)
   })
 })

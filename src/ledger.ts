@@ -1,7 +1,7 @@
 import fs from "node:fs"
-import type { Ledger, LedgerModelState } from "./types.js"
+import type { Ledger, LedgerAllowance, LedgerModelState } from "./types.js"
 import { isPlainObject, readJsonFile, writeJson } from "./paths.js"
-import { FIVE_HOUR_SHARE } from "./scoring.js"
+import { FIVE_HOUR_SHARE, WEEK_SHARE } from "./scoring.js"
 
 const HOUR = 3_600_000
 const DAY = 24 * HOUR
@@ -9,8 +9,6 @@ export const WINDOW_5H = 5 * HOUR
 export const WINDOW_WEEK = 7 * DAY
 export const WINDOW_MONTH = 30 * DAY
 
-/** A model is unhealthy once it has used this share of its monthly allowance. */
-const MONTHLY_LIMIT = 0.95
 
 function emptyState(now: number): LedgerModelState {
   return {
@@ -47,9 +45,17 @@ export interface ModelUsage {
   costMonth: number
   tokens5h: number
   tokensMonth: number
+  cooldownUntil: number | null
+}
+
+/** Use of the shared Go allowance, as a part of each window's limit (1 = 100%). */
+export interface AllowanceUsage {
   pct5h: number
+  pctWeek: number
   pctMonth: number
   cooldownUntil: number | null
+  /** Why the cooldown started; null without a cooldown. */
+  cooldownReason: string | null
 }
 
 /**
@@ -118,7 +124,8 @@ export class LedgerStore {
     return this.roll(entry, now)
   }
 
-  record(modelId: string, costUSD: number, tokens: number): void {
+  /** `allowanceShare`: the cost divided by the model's monthly limit; 0 for a model outside the Go allowance. */
+  record(modelId: string, costUSD: number, tokens: number, allowanceShare = 0): void {
     const state = this.state(modelId)
     state.cost5h += costUSD
     state.costWeek += costUSD
@@ -127,7 +134,24 @@ export class LedgerStore {
     state.tokensWeek += tokens
     state.tokensMonth += tokens
     state.lastUsedAt = this.now()
+    if (allowanceShare > 0) this.addShare(allowanceShare)
     this.save()
+  }
+
+  /** Call after sync() or state(), never before: a reload would drop changes to the old data. */
+  private sharedAllowance(): LedgerAllowance {
+    if (!this.data.allowance || !Array.isArray(this.data.allowance.buckets)) this.data.allowance = { buckets: [] }
+    return this.data.allowance
+  }
+
+  private addShare(share: number): void {
+    const allowance = this.sharedAllowance()
+    const now = this.now()
+    const hour = Math.floor(now / HOUR) * HOUR
+    allowance.buckets = allowance.buckets.filter(([start]) => start + HOUR > now - WINDOW_MONTH)
+    const bucket = allowance.buckets.find(([start]) => start === hour)
+    if (bucket) bucket[1] += share
+    else allowance.buckets.push([hour, share])
   }
 
   cooldown(modelId: string, durationMs: number, reason?: string): void {
@@ -143,16 +167,50 @@ export class LedgerStore {
     this.save()
   }
 
-  usage(modelId: string, monthlyCapUSD: number | null): ModelUsage {
-    return usageOf(this.state(modelId), monthlyCapUSD)
+  inCooldown(modelId: string): boolean {
+    const until = this.state(modelId).cooldownUntil
+    return until !== undefined && this.now() < until
   }
 
-  /** Healthy = not cooling down, under the soft threshold for 5 hours, and under the monthly limit. */
-  isHealthy(modelId: string, monthlyCapUSD: number | null, softThreshold: number): boolean {
+  /** After a usage-limit error: every model that uses the shared allowance is limited. */
+  cooldownAllowance(durationMs: number, reason?: string): void {
+    this.sync()
+    const allowance = this.sharedAllowance()
+    allowance.cooldownUntil = this.now() + durationMs
+    if (reason) allowance.lastError = reason
+    this.save()
+  }
+
+  usage(modelId: string): ModelUsage {
     const state = this.state(modelId)
-    if (state.cooldownUntil && this.now() < state.cooldownUntil) return false
-    const u = usageOf(state, monthlyCapUSD)
-    return u.pct5h < softThreshold && u.pctMonth < MONTHLY_LIMIT
+    return {
+      cost5h: state.cost5h,
+      costMonth: state.costMonth,
+      tokens5h: state.tokens5h,
+      tokensMonth: state.tokensMonth,
+      cooldownUntil: state.cooldownUntil ?? null,
+    }
+  }
+
+  /** Rolling use of the shared allowance in the last 5 hours, 7 days, and 30 days. */
+  allowance(): AllowanceUsage {
+    this.sync()
+    const allowance = this.sharedAllowance()
+    const now = this.now()
+    const cooldownUntil = allowance.cooldownUntil !== undefined && now < allowance.cooldownUntil ? allowance.cooldownUntil : null
+    return {
+      pct5h: windowShare(allowance.buckets, now, WINDOW_5H) / FIVE_HOUR_SHARE,
+      pctWeek: windowShare(allowance.buckets, now, WINDOW_WEEK) / WEEK_SHARE,
+      pctMonth: windowShare(allowance.buckets, now, WINDOW_MONTH),
+      cooldownUntil,
+      cooldownReason: cooldownUntil === null ? null : (allowance.lastError ?? null),
+    }
+  }
+
+  /** True when no window has reached `softThreshold` and no usage-limit cooldown is active. */
+  allowanceAvailable(softThreshold: number): boolean {
+    const u = this.allowance()
+    return u.cooldownUntil === null && u.pct5h < softThreshold && u.pctWeek < softThreshold && u.pctMonth < softThreshold
   }
 
   snapshot(): Ledger {
@@ -166,15 +224,18 @@ export class LedgerStore {
   }
 }
 
-function usageOf(state: LedgerModelState, monthlyCapUSD: number | null): ModelUsage {
-  const cap5h = monthlyCapUSD === null ? null : monthlyCapUSD * FIVE_HOUR_SHARE
-  return {
-    cost5h: state.cost5h,
-    costMonth: state.costMonth,
-    tokens5h: state.tokens5h,
-    tokensMonth: state.tokensMonth,
-    pct5h: cap5h === null || cap5h <= 0 ? 0 : state.cost5h / cap5h,
-    pctMonth: monthlyCapUSD === null || monthlyCapUSD <= 0 ? 0 : state.costMonth / monthlyCapUSD,
-    cooldownUntil: state.cooldownUntil ?? null,
+/**
+ * Sum of the shares in the last `windowMs`. The use in one hour is taken as
+ * even, so an hour that is partly inside the window counts in part.
+ */
+function windowShare(buckets: Array<[number, number]>, now: number, windowMs: number): number {
+  const from = now - windowMs
+  let sum = 0
+  for (const [start, share] of buckets) {
+    const end = Math.min(start + HOUR, now)
+    if (end <= from || start > now) continue
+    const span = end - start
+    sum += span <= 0 ? share : (share * (end - Math.max(start, from))) / span
   }
+  return sum
 }

@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util"
-import { activeEntries, buildRoutingTable, statusRows, usagePercent } from "./engine.js"
+import { buildRoutingTable, statusRows } from "./engine.js"
 import { formatScorecard, formatStatus } from "./format.js"
 import { patchServerConfig, routingConfigBody, writeRoutingConfig } from "./apply.js"
 import { LedgerStore } from "./ledger.js"
@@ -158,12 +158,14 @@ async function cmdStatus(opts: CommonOpts): Promise<number> {
   const ledger = new LedgerStore(ledgerFile())
   const rows = statusRows(result, ledger)
 
+  // The free plan has no Go allowance.
+  const allowance = result.cfg.plan === "free" ? undefined : ledger.allowance()
+
   if (opts.json) {
-    const usage: Record<string, { pct: number }> = {}
-    for (const entry of activeEntries(result.table)) usage[entry.id] = { pct: usagePercent(result, ledger, entry.id) }
-    process.stdout.write(JSON.stringify({ table: result.table, rows, usage }, null, 2) + "\n")
+    process.stdout.write(JSON.stringify({ table: result.table, rows, allowance: allowance ?? null }, null, 2) + "\n")
   } else {
-    process.stdout.write(formatStatus(result.table, rows) + "\n")
+    const status = allowance && { usage: allowance, softThreshold: result.cfg.softThreshold }
+    process.stdout.write(formatStatus(result.table, rows, status) + "\n")
     await writeUpdateNotice(opts)
   }
   return 0

@@ -93,6 +93,16 @@ export function rankRole(
       chosen.push(entry)
     }
   }
+  // All Go subscription models share one usage allowance, so another
+  // subscription model does not help when it runs out. End the chain with the
+  // best free model (if the privacy setting allows one).
+  if (cfg.plan !== "free" && !chosen.some((entry) => entry.model.free)) {
+    const free = scored.find((entry) => entry.model.free)
+    if (free) {
+      if (chosen.length >= depth && chosen.length > 1) chosen.pop()
+      chosen.push(free)
+    }
+  }
 
   return chosen.map((entry, index) => ({
     rank: index + 1,

@@ -157,7 +157,9 @@ message automatically.
 ## 4. Read the scorecard
 
 The scorecard has one block of rows for each role. The first row of a block is the model
-that the role uses. The other rows are the failover models, in sequence.
+that the role uses. The other rows are the failover models, in sequence. On Go and Go
+Plus, the last row of each agent is a free model (see
+[How the router changes models](#how-the-router-changes-models)).
 
 | Column | Meaning |
 | :-- | :-- |
@@ -168,12 +170,37 @@ that the role uses. The other rows are the failover models, in sequence.
 | Score | The total score, 0 to 100 |
 | Intel | Intelligence score, 0 to 100 |
 | Speed | Speed score, 0 to 100 |
-| Endur | Endurance score, 0 to 100. A high value means that the model can run for a long time on your quota |
-| Tokens/5h | The estimated number of tokens that your quota gives in 5 hours. `unlimited` means no limit |
-| Cap/mo | The monthly dollar allowance for the model on your plan. `inf` means no limit |
+| Endur | Endurance score, 0 to 100. A high value means that the model uses the Go allowance slowly |
+| Tokens/5h | The estimated number of tokens in 5 hours if the agent uses only this model. `unlimited` means no limit |
+| Cap/mo | The monthly limit of the model on your plan. `inf` means no limit |
 | Class | `go` = included in your Go subscription. `free*` = free (your data can be collected). `paid` = Zen pay-as-you-go |
 
 The **Notes** section under the table shows problems, for example a missing catalog.
+
+### How the router changes models
+
+- All `go` models share one usage allowance. Each message uses a part of it: the cost of
+  the message divided by the monthly limit of its model (`Cap/mo`). A model with a low
+  limit uses the allowance faster.
+- The allowance has 3 windows: 5 hours (20% of the monthly allowance), 7 days (50%), and
+  30 days (100%). The router estimates the use in each window from the messages that it
+  records.
+- When the use in a window reaches `softThreshold` (default 85%), the `plan`, `build`,
+  `general`, and `explore` agents use the free model at the end of their list. When the
+  use falls under the threshold again, they go back to their first model.
+- After a usage-limit error from a `go` model, the router stops all `go` models for
+  1 hour. The agents use their free models in that time.
+- After a different rate-limit or overload error, the router stops only that model for
+  1 hour. The agent uses the next model in its list.
+
+`/routing-status` shows the estimated use of the allowance and the state of each agent:
+
+| State | Meaning |
+| :-- | :-- |
+| `healthy` | The agent uses its first model |
+| `failover` | The agent uses a later model, because an earlier model is in cooldown |
+| `free-fallback` | The agent uses its free model, because the Go allowance is near its limit or in cooldown |
+| `limited` | The agent has no usable model. The router keeps the first model |
 
 ## 5. Select your plan
 
@@ -220,6 +247,9 @@ use free models.
 }
 ```
 
+With this setting, these agents have no free model at the end of their list. When the
+Go allowance runs out, they stop until it resets.
+
 ### Never use some models
 
 `*` matches any text. `?` matches one character.
@@ -242,8 +272,9 @@ If `allowModels` is not empty, the router uses only the models in the list.
 
 ### Change models earlier or later
 
-`softThreshold` sets when the router changes to the next model. `0.7` changes at 70% of
-the 5-hour limit. The default is `0.85`.
+`softThreshold` sets when the agents change to their free model. `0.7` changes when the
+use of the shared Go allowance reaches 70% in one of its windows (5 hours, 7 days, or
+30 days). The default is `0.85`.
 
 ```json
 {
@@ -280,7 +311,8 @@ Use this setting when you know that a model is better or worse than its score.
 
 `chainDepth` sets the number of models in each failover list. The default is 4 for the
 agents and 3 for the internal helpers. A value under `roles.<role>` wins over the
-top-level value.
+top-level value. On Go and Go Plus, the last model of each list is a free model, if your
+privacy setting permits free models.
 
 ```json
 {
@@ -381,7 +413,7 @@ These commands work in PowerShell, CMD, Git Bash, macOS, and Linux.
 | `opencode-router refresh --scope project` | Write the routing table to `opencode.json` in the current folder |
 | `opencode-router refresh --plan free` | Use the `free` profile for this run only |
 | `opencode-router refresh --json` | Print the result as JSON |
-| `opencode-router status` | Show the model in use for each role (after failover) and its 5-hour use |
+| `opencode-router status` | Show the model in use for each role (after failover) and the estimated use of the Go allowance |
 | `opencode-router plan go-plus --scope global` | Save the plan in the global settings, then calculate and write the routing table |
 | `opencode-router cat` | Show the catalog path, its date, and the number of models |
 | `opencode-router install --scope global` | Write the slash commands as files in `~/.config/opencode/command/`. If `router.config.json` does not exist, it also writes an empty one |
@@ -462,7 +494,7 @@ The router writes these files:
 
 | File | Written by | Contents |
 | :-- | :-- | :-- |
-| `~/.config/opencode/router/ledger.json` | Plugin | Spend and tokens per model for 5 hours, 7 days, and 30 days, and cooldowns |
+| `~/.config/opencode/router/ledger.json` | Plugin | Spend and tokens per model, the use of the shared Go allowance in the last 30 days, and cooldowns |
 | `~/.config/opencode/router/routing-table.json` | Plugin | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | Plugin | The result of the last live apply |
 | `~/.config/opencode/router/eval-report.md` | `/routing-eval` | The test report |
@@ -493,11 +525,12 @@ Do not commit the `router/` folder. It contains your usage data.
 | "live PATCH not attempted (no OPENCODE_SERVER_URL set)" | Normal when you run `refresh` in a terminal | No action. Or see [Apply to a running OpenCode server](#apply-to-a-running-opencode-server) |
 | "hot-apply failed: ..." | OpenCode did not accept the change | Restart OpenCode. The file `opencode.json` has the new models |
 | A model that you selected by hand changes back | The router selects the model at each message | See [Known limits](#11-known-limits) |
+| An agent uses a free model (`free-fallback` in `/routing-status`) | The Go allowance is near its limit, or a usage-limit error occurred | No action. The agent goes back to its first model when the use falls or the cooldown ends. To change the limit, set [`softThreshold`](#change-models-earlier-or-later) |
 | The scores look wrong | A model has no entry in `model-scores.json` | Run `npx @s-berdia/opencode-router refresh --dry-run --verbose`. If the source is `heuristic` or `default`, add the model to `scores` |
 
 ## 11. Known limits
 
-These are the limits of version 1.1.1.
+These are the limits of version 1.2.0.
 
 1. The router sets the model of the `plan`, `build`, `general`, and `explore` agents at
    each message. If you select a different model by hand, the router replaces it. To
@@ -507,12 +540,18 @@ These are the limits of version 1.1.1.
 3. The slash commands always write the global files (`~/.config/opencode/`). To write the
    files of one project, use the terminal tool with `--scope project`.
 4. The slash commands need Node.js 20 or later on the `PATH`.
-5. Use numbers are estimates. The router takes 20% of the monthly allowance as the
-   5-hour limit. The 5-hour period starts at the first message after the last period
-   ended. If two OpenCode windows write at the same moment, one record can be lost.
-6. After a rate-limit or quota error, the model goes into a 1-hour cooldown. A
-   rate-limit error for a full session puts only the model of that session into a
-   cooldown.
+5. Use numbers are estimates. The router counts only the messages that it records. Use
+   from another computer is not included. After an update from version 1.1 or earlier,
+   the estimate starts at 0%. If two OpenCode windows write at the same moment, one
+   record can be lost.
+6. The router treats the 3 windows as rolling windows. If OpenCode resets a window at a
+   fixed time, the estimate can differ from the console.
+7. After a usage-limit error, all `go` models go into a 1-hour cooldown. After a
+   different rate-limit or overload error, only that model goes into a cooldown.
+8. With `"privacy": { "freeModelsOk": false }`, the `plan`, `build`, and `general` agents
+   have no free model. When the Go allowance runs out, they stop until it resets.
+9. The router does not know about **Extra usage** in the OpenCode console. It moves the
+   agents to free models at the threshold, also when Extra usage is on.
 
 ## 12. Update the router
 
@@ -559,7 +598,7 @@ To select the version yourself, write it in the `plugin` list:
 
 ```json
 {
-  "plugin": ["@s-berdia/opencode-router@1.1.1"]
+  "plugin": ["@s-berdia/opencode-router@1.2.0"]
 }
 ```
 

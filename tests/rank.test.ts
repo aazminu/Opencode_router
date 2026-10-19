@@ -69,6 +69,41 @@ describe("rankRole", () => {
   })
 })
 
+describe("free fallback", () => {
+  // Five Go models outscore the free model, so without a fallback the list has no free model.
+  const goModels = ["a", "b", "c", "d", "e"].map((name) =>
+    model({ providerID: "opencode-go", modelID: `go-${name}`, family: name, cost: { input: 0.1, output: 0.5 } }),
+  )
+  const free = model({ providerID: "opencode", modelID: "free-fast", family: "ff", cost: { input: 0, output: 0 }, free: true })
+  const catalog = [...goModels, free]
+
+  function goTable() {
+    const t = table()
+    for (const m of goModels) t.monthlyCaps[m.id] = { go: 60, goPlus: 120 }
+    return t
+  }
+
+  it("ends the list of a real-work role with a free model on the go plan", () => {
+    const chain = rankRole(catalog, "build", goTable(), cfgFor("go"), emptyFeedScores())
+    expect(chain).toHaveLength(4)
+    expect(chain.slice(0, 3).every((e) => e.class === "subscription")).toBe(true)
+    expect(chain[3]?.id).toBe("opencode/free-fast")
+  })
+
+  it("keeps the first model when the chain depth is 1", () => {
+    const t = goTable()
+    t.roles.build = { ...t.roles.build!, chainDepth: 1 }
+    const chain = rankRole(catalog, "build", t, cfgFor("go"), emptyFeedScores())
+    expect(chain.map((e) => e.class)).toEqual(["subscription", "free"])
+  })
+
+  it("adds no free model when privacy.freeModelsOk is false", () => {
+    const cfg = { ...cfgFor("go"), privacy: { freeModelsOk: false } }
+    const chain = rankRole(catalog, "build", goTable(), cfg, emptyFeedScores())
+    expect(chain.some((e) => e.class === "free")).toBe(false)
+  })
+})
+
 describe("rank robustness", () => {
   it("handles an empty catalog", () => {
     const chain = rankRole([] as CatalogModel[], "build", table(), cfgFor("go"), emptyFeedScores())

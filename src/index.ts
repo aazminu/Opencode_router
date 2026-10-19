@@ -1,5 +1,5 @@
 import type { Plugin, PluginInput } from "@opencode-ai/plugin"
-import { buildRoutingTable, healthCheck, pickForRole, type BuildResult } from "./engine.js"
+import { allowanceShare, buildRoutingTable, healthCheck, pickForRole, usesAllowance, type BuildResult } from "./engine.js"
 import { LedgerStore } from "./ledger.js"
 import { blendedCost } from "./scoring.js"
 import { routingConfigBody } from "./apply.js"
@@ -21,15 +21,25 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function errorData(error: unknown): { status: number; message: string } {
+  if (!error || typeof error !== "object") return { status: 0, message: "" }
+  const data = ((error as Record<string, unknown>).data ?? {}) as Record<string, unknown>
+  return {
+    status: Number(data.statusCode ?? data.status ?? 0),
+    message: String(data.message ?? data.responseBody ?? "").toLowerCase(),
+  }
+}
+
+/** The Go usage allowance is used up. It is shared, so every subscription model is limited. */
+function isUsageLimitError(error: unknown): boolean {
+  const { status, message } = errorData(error)
+  return status === 402 || /usage limit|limit (?:has been |was )?reached|quota|insufficient|exceeded your/.test(message)
+}
+
 /** Quota and rate-limit errors only. A plain bad request must not bench a model. */
 function isRateLimitError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false
-  const rec = error as Record<string, unknown>
-  const data = (rec.data ?? {}) as Record<string, unknown>
-  const status = Number(data.statusCode ?? data.status ?? 0)
-  const message = String(data.message ?? data.responseBody ?? "").toLowerCase()
-  if (status === 429 || status === 402) return true
-  return /rate.?limit|quota|too many requests|insufficient|capacity|overloaded/.test(message)
+  const { status, message } = errorData(error)
+  return status === 429 || isUsageLimitError(error) || /rate.?limit|too many requests|capacity|overloaded/.test(message)
 }
 
 function isAuthError(error: unknown): boolean {
@@ -75,6 +85,15 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
       // Record failures too: the CLI reports this in the Applied line, so a
       // rejected config body is visible instead of silently swallowed.
       writeApplyMarker({ ok: false, detail: `hot-apply failed: ${errorMessage(error)}` })
+    }
+  }
+
+  /** A usage-limit error on a subscription model limits the shared allowance; other limits bench one model. */
+  async function coolDown(modelId: string, error: unknown, reason: string): Promise<void> {
+    if (isUsageLimitError(error) && usesAllowance(await ensure(), modelId)) {
+      ledger.cooldownAllowance(RATE_LIMIT_COOLDOWN_MS, "Go usage limit")
+    } else if (isRateLimitError(error)) {
+      ledger.cooldown(modelId, RATE_LIMIT_COOLDOWN_MS, reason)
     }
   }
 
@@ -165,18 +184,18 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
             (info.tokens?.output ?? 0) +
             (info.tokens?.cache?.read ?? 0) +
             (info.tokens?.cache?.write ?? 0)
+          const result = await ensure()
           let cost = info.cost ?? 0
           // Subscription turns may report $0. Estimate from the catalog so the
           // rolling ledger stays meaningful and failover still triggers.
           if (cost === 0 && tokens > 0) {
-            await ensure()
             const blended = blendedById.get(id) ?? 0
             if (blended > 0) cost = (tokens / 1_000_000) * blended
           }
-          ledger.record(id, cost, tokens)
+          ledger.record(id, cost, tokens, allowanceShare(result, id, cost))
 
-          if (isRateLimitError(info.error)) ledger.cooldown(id, RATE_LIMIT_COOLDOWN_MS, "rate limit / quota")
-          else if (isAuthError(info.error)) ledger.cooldown(id, AUTH_COOLDOWN_MS, "auth error")
+          if (isAuthError(info.error)) ledger.cooldown(id, AUTH_COOLDOWN_MS, "auth error")
+          else await coolDown(id, info.error, "rate limit / quota")
         } else if (event.type === "session.created" && !updateToastShown) {
           updateToastShown = true
           // Do not hold up the event: the npm request can take a few seconds.
@@ -193,7 +212,7 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
         } else if (event.type === "session.error") {
           const { sessionID, error } = event.properties
           const id = sessionID ? sessionModels.get(sessionID) : undefined
-          if (id && isRateLimitError(error)) ledger.cooldown(id, RATE_LIMIT_COOLDOWN_MS, "session rate limit")
+          if (id) await coolDown(id, error, "session rate limit")
         }
       } catch {
         /* ignore */

@@ -13,6 +13,8 @@ import type {
 
 /** Share of the monthly allowance that one 5-hour window may use. */
 export const FIVE_HOUR_SHARE = 0.2
+/** Share of the monthly allowance that one 7-day window may use. */
+export const WEEK_SHARE = 0.5
 
 /** Score bonus for a free model in a role that prefers free models. */
 const FREE_ROLE_BONUS = 6

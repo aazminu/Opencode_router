@@ -8,14 +8,14 @@
 **Switch models before you hit your [OpenCode](https://opencode.ai) limit.** Automatic
 model routing and quota failover for the **Go**, **Go Plus**, and **Free** plans.
 
-![opencode-router demo: the scorecard gives each agent a model, and the build agent changes to the next model at 85% of its 5-hour limit](docs/router-demo.gif)
+![opencode-router demo: the scorecard gives each agent a model, and the build agent moves to a free model at 85% of the shared Go allowance](docs/router-demo.gif)
 
 [Watch the demo in full quality (MP4, 25 seconds)](docs/router-demo.mp4?raw=true)
 
 opencode-router gives each OpenCode agent the best model for its job and for your plan.
-It records how much of your quota each model uses. When a model is near its limit, the
-router moves the agent to the next model in its list. When the limit resets, the router
-moves the agent back.
+All Go models share one usage allowance, and the router estimates how much of it you
+used. When the allowance is near its limit, the router moves the agents to free models,
+so your work does not stop. When the use falls again, the router moves them back.
 
 For full step-by-step instructions, read the [usage guide](./USAGE.md). Before you use
 the router, read its [known limits](./USAGE.md#11-known-limits).
@@ -29,8 +29,10 @@ the router, read its [known limits](./USAGE.md#11-known-limits).
   monthly allowance of each model to calculate how many tokens the model can supply in
   5 hours.
 - **Automatic failover.** The `plan`, `build`, `general`, and `explore` agents each have a
-  ranked list of up to 4 models. The router changes to the next model before a limit is
-  reached, and after a rate-limit error.
+  ranked list of up to 4 models. On Go and Go Plus, the last one is a free model. At 85%
+  of the shared Go allowance, or after a usage-limit error, the agents move to their free
+  model. After a rate-limit or overload error of one model, the agent moves to the next
+  model in its list.
 - **Live apply.** The router changes the models in the running OpenCode session. You do
   not have to restart OpenCode after a refresh.
 - **Clear results.** A scorecard shows each model and its scores. With `--verbose`, it
@@ -92,7 +94,7 @@ See [Update the router](./USAGE.md#12-update-the-router).
 | Command | What it does |
 | :-- | :-- |
 | `/refresh-routing` | Calculate the routing table again, apply it, and show the scorecard |
-| `/routing-status` | Show the model in use for each agent (after failover) and its 5-hour quota use |
+| `/routing-status` | Show the model in use for each agent (after failover) and the estimated use of the Go allowance |
 | `/routing-plan go-plus` | Save a plan profile (`go`, `go-plus`, or `free`) and apply it immediately |
 | `/routing-eval` | Send one test prompt to the `build` models and write a report |
 | `/routing-update` | Look for a newer version and remove the old copy that OpenCode keeps. Then restart OpenCode |
@@ -150,8 +152,8 @@ or a value that is not valid, the router ignores it and shows a note in the scor
 | Key | Default | Meaning |
 | :-- | :-- | :-- |
 | `plan` | detected from your catalog | `go`, `go-plus`, or `free` |
-| `chainDepth` | 4 for agents, 3 for helpers | Number of models in each failover list. `roles.<role>.chainDepth` wins over it |
-| `softThreshold` | `0.85` | Change to the next model when 5-hour use reaches this part of the 5-hour limit (0.85 = 85%) |
+| `chainDepth` | 4 for agents, 3 for helpers | Number of models in each failover list, including the free model at the end. `roles.<role>.chainDepth` wins over it |
+| `softThreshold` | `0.85` | Move the agents to their free model when the use of the shared Go allowance reaches this part of a window's limit (0.85 = 85%) |
 | `privacy.freeModelsOk` | `true` | `false` keeps `plan`, `build`, and `general` off free models |
 | `denyModels` | `[]` | Model IDs to never use. `*` and `?` wildcards are permitted |
 | `allowModels` | `[]` | If not empty, use only these model IDs |
@@ -190,7 +192,7 @@ score = w_intelligence * intelligence
 
 | File | Contents |
 | :-- | :-- |
-| `~/.config/opencode/router/ledger.json` | Spend and tokens per model for 5 hours, 7 days, and 30 days |
+| `~/.config/opencode/router/ledger.json` | Spend and tokens per model, the use of the shared Go allowance in the last 30 days, and cooldowns |
 | `~/.config/opencode/router/routing-table.json` | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | The result of the last live apply |
 | `~/.config/opencode/router/eval-report.md` | The report of the last `/routing-eval` |
@@ -205,6 +207,8 @@ If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in plac
 Models with `-free` in their name can collect your prompts for training. The scorecard
 marks them `free*`. To keep your main work off these models, set
 `"privacy": { "freeModelsOk": false }`. To never use them, set `"denyModels": ["*-free"]`.
+With either setting, the agents have no free model to move to, so they stop when the Go
+allowance runs out.
 
 Once each 24 hours, the router sends one request to `registry.npmjs.org` to get the
 newest version number of the router. It sends no other data. To stop this, set

@@ -30,6 +30,13 @@ describe("cli refresh", () => {
     expect(JSON.parse(stdout).table.plan).toBe("free")
   })
 
+  it("explains the shared Go allowance and the free fallback on a Go plan only", async () => {
+    const { stdout: go } = await run("refresh", "--dry-run", "--plan", "go")
+    const { stdout: free } = await run("refresh", "--dry-run", "--plan", "free")
+    expect(go).toContain("All `go` models share one usage allowance")
+    expect(free).not.toContain("usage allowance")
+  })
+
   it("rejects an unknown plan", async () => {
     const { result, stderr } = await run("refresh", "--plan", "gold", "--dry-run")
     expect(result).toBe(2)
@@ -45,13 +52,39 @@ describe("cli refresh", () => {
 })
 
 describe("cli status", () => {
-  it("reads the global ledger that the plugin writes", async () => {
-    const { stdout: refreshed } = await run("refresh", "--dry-run", "--json")
-    const buildId = JSON.parse(refreshed).table.active.build[0].id as string
-    new LedgerStore(path.join(globalOpencodeDir(), "router", "ledger.json")).record(buildId, 5, 1000)
+  function ledger(): LedgerStore {
+    return new LedgerStore(path.join(globalOpencodeDir(), "router", "ledger.json"))
+  }
+
+  it("reads the shared Go allowance from the ledger that the plugin writes", async () => {
+    ledger().record("opencode-go/glm-5.3-flash", 6, 1000, 0.1)
 
     const { stdout } = await run("status", "--json")
-    expect(JSON.parse(stdout).usage[buildId].pct).toBeGreaterThan(0)
+
+    expect(JSON.parse(stdout).allowance.pct5h).toBeCloseTo(0.5, 5)
+  })
+
+  it("shows the allowance use and the free fallback", async () => {
+    // 90% of the 5-hour allowance.
+    ledger().record("opencode-go/glm-5.3-flash", 10.8, 1000, 0.18)
+
+    const { stdout } = await run("status", "--scope", "global")
+
+    expect(stdout).toContain("Go allowance used (estimate): 5 hours 90%, 7 days 36%, 30 days 18%")
+    expect(stdout).toMatch(/\| build \| `opencode\/[^`]+-free` \| \d \| free-fallback \|/)
+  })
+
+  it("shows an allowance cooldown", async () => {
+    ledger().cooldownAllowance(60 * 60 * 1000, "Go usage limit")
+
+    const { stdout } = await run("status", "--scope", "global")
+
+    expect(stdout).toMatch(/Go allowance cooldown until \d\d:\d\d UTC \(Go usage limit\)/)
+  })
+
+  it("shows no allowance line on the free plan", async () => {
+    const { stdout } = await run("status", "--plan", "free", "--scope", "global")
+    expect(stdout).not.toContain("Go allowance")
   })
 })
 

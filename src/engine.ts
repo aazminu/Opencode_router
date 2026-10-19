@@ -68,51 +68,65 @@ export async function buildRoutingTable(opts: BuildOptions = {}): Promise<BuildR
   return { table, cfg, scoreTable, catalog }
 }
 
-/** Every entry of every active chain. */
-export function activeEntries(table: RoutingTable): RankingEntry[] {
-  return ROLE_NAMES.flatMap((role) => table.active[role] ?? [])
-}
-
-/** The model a role should use right now, given the ledger's health flags. */
+/** The model a role should use right now: the first usable model of its chain. */
 export function pickForRole(
   table: RoutingTable,
   role: RoleName,
-  isHealthy: (modelId: string) => boolean,
+  isUsable: (entry: RankingEntry) => boolean,
 ): RankingEntry | undefined {
   const chain = table.active[role]
   if (!chain || chain.length === 0) return undefined
-  return chain.find((entry) => isHealthy(entry.id)) ?? chain[0]
+  return chain.find(isUsable) ?? chain[0]
 }
 
-/** Health check for one model id, from the ledger and the active plan's caps. */
-export function healthCheck(result: BuildResult, ledger: LedgerStore): (modelId: string) => boolean {
-  return (modelId) =>
-    ledger.isHealthy(modelId, monthlyCapFor(modelId, result.scoreTable, result.cfg.plan), result.cfg.softThreshold)
+/**
+ * Usable = the model is not in cooldown, and, for a Go subscription model, the
+ * shared allowance is under the soft threshold.
+ */
+export function healthCheck(result: BuildResult, ledger: LedgerStore): (entry: RankingEntry) => boolean {
+  const allowanceOk = ledger.allowanceAvailable(result.cfg.softThreshold)
+  return (entry) => !ledger.inCooldown(entry.id) && (allowanceOk || entry.class !== "subscription")
 }
 
-/** Usage of each model in the 5-hour window, in percent of its 5-hour allowance. */
-export function usagePercent(result: BuildResult, ledger: LedgerStore, modelId: string): number {
-  return ledger.usage(modelId, monthlyCapFor(modelId, result.scoreTable, result.cfg.plan)).pct5h * 100
+/** True when the model's use counts toward the shared Go allowance. */
+export function usesAllowance(result: BuildResult, modelId: string): boolean {
+  const cap = monthlyCapFor(modelId, result.scoreTable, result.cfg.plan)
+  return cap !== null && cap > 0
 }
 
-export type RoleState = "healthy" | "failover" | "limited" | "none"
+/** The part of the monthly Go allowance that `costUSD` on this model uses. */
+export function allowanceShare(result: BuildResult, modelId: string, costUSD: number): number {
+  const cap = monthlyCapFor(modelId, result.scoreTable, result.cfg.plan)
+  return cap !== null && cap > 0 ? costUSD / cap : 0
+}
+
+/**
+ * healthy = first model; failover = a later model, because an earlier one is in
+ * cooldown; free-fallback = a free model, because the Go allowance is near its
+ * limit; limited = no usable model.
+ */
+export type RoleState = "healthy" | "failover" | "free-fallback" | "limited" | "none"
 
 export interface StatusRow {
   role: RoleName
   /** The model in use now; undefined when the role has no eligible model. */
   entry?: RankingEntry
-  pct5h: number
   state: RoleState
 }
 
-/** The model each role uses now, after failover, with its 5-hour use. */
+/** The model each role uses now, after failover. */
 export function statusRows(result: BuildResult, ledger: LedgerStore): StatusRow[] {
-  const isHealthy = healthCheck(result, ledger)
+  const isUsable = healthCheck(result, ledger)
+  const allowanceOk = ledger.allowanceAvailable(result.cfg.softThreshold)
   return ROLE_NAMES.map((role): StatusRow => {
     // Only the agent roles switch per message; the internal roles keep the first model.
-    const entry = isAgentRole(role) ? pickForRole(result.table, role, isHealthy) : result.table.active[role]?.[0]
-    if (!entry) return { role, pct5h: 0, state: "none" }
-    const state: RoleState = !isHealthy(entry.id) ? "limited" : entry.rank > 1 ? "failover" : "healthy"
-    return { role, entry, pct5h: usagePercent(result, ledger, entry.id), state }
+    const entry = isAgentRole(role) ? pickForRole(result.table, role, isUsable) : result.table.active[role]?.[0]
+    if (!entry) return { role, state: "none" }
+    const first = result.table.active[role]?.[0]
+    let state: RoleState = "healthy"
+    if (!isUsable(entry)) state = "limited"
+    else if (entry.rank > 1 && entry.class === "free" && first?.class === "subscription" && !allowanceOk) state = "free-fallback"
+    else if (entry.rank > 1) state = "failover"
+    return { role, entry, state }
   })
 }
