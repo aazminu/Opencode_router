@@ -29,7 +29,7 @@
     }
   },
   "bin": {
-    "opencode-router": "./dist/bin.js"
+    "opencode-router": "dist/bin.js"
   },
   "files": [
     "dist",
