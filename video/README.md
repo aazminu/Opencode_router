@@ -34,6 +34,17 @@ npx remotion render RouterDemo out/router-demo.gif --codec=gif --scale=0.5 --eve
 
 Copy both files from `out/` to `../docs/`, because the main README uses them from there.
 
+### Social preview
+
+The social preview is the image that GitHub shows when someone shares a link to the
+repo. It is a still image of 1280 × 640 pixels (`src/SocialPreview.tsx`).
+
+```bash
+npx remotion still SocialPreview out/social-preview.png
+```
+
+Copy it to `../docs/social-preview.png`.
+
 ## License
 
 Remotion has its own license. It is free for teams of up to 3 people. Read

@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/s-berdia/Opencode_router/discussions
+    about: Ask how to use the router, or share an idea before you open an issue.
+  - name: Usage guide
+    url: https://github.com/s-berdia/Opencode_router/blob/main/USAGE.md
+    about: Step-by-step instructions, settings, and troubleshooting.

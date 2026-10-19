@@ -1,5 +1,6 @@
-import { Composition, Folder } from "remotion";
+import { Composition, Folder, Still } from "remotion";
 import { RouterDemo } from "./RouterDemo";
+import { SocialPreview } from "./SocialPreview";
 import { FailoverScene } from "./scenes/FailoverScene";
 import { InstallScene } from "./scenes/InstallScene";
 import { ProblemScene } from "./scenes/ProblemScene";
@@ -53,6 +54,7 @@ export const RemotionRoot: React.FC = () => {
         fps={30}
         durationInFrames={765}
       />
+      <Still id="SocialPreview" component={SocialPreview} width={1280} height={640} />
     </>
   );
 };

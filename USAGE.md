@@ -42,7 +42,22 @@ Make sure that you have these items:
 
 ## 2. Install the plugin
 
-### Option A: from npm (recommended)
+### Option A: with the OpenCode command-line tool (fastest)
+
+1. Run this command. It works in PowerShell, CMD, Git Bash, macOS, and Linux:
+
+   ```bash
+   opencode plugin @s-berdia/opencode-router --global
+   ```
+
+   The command downloads the plugin and adds `"@s-berdia/opencode-router"` to the
+   `plugin` list of your global config file.
+2. Close OpenCode. Start OpenCode again.
+
+If the `opencode` command is not found, use Option B. Or install the command-line tool
+with `npm install -g opencode-ai`, and then do step 1 again.
+
+### Option B: from npm, by hand
 
 1. Open the global OpenCode config file.
 
@@ -82,7 +97,7 @@ Make sure that you have these items:
 To use the router in one project only, put the `plugin` entry in `opencode.json` in the
 root folder of that project, not in the global file.
 
-### Option B: from source
+### Option C: from source
 
 Use this option to test changes to the code.
 

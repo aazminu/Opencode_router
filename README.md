@@ -1,6 +1,12 @@
 # opencode-router
 
-Automatic model routing for [OpenCode](https://opencode.ai) on the **Go**, **Go Plus**, and **Free** plans.
+[![npm version](https://img.shields.io/npm/v/@s-berdia/opencode-router)](https://www.npmjs.com/package/@s-berdia/opencode-router)
+[![npm downloads](https://img.shields.io/npm/dm/@s-berdia/opencode-router)](https://www.npmjs.com/package/@s-berdia/opencode-router)
+[![CI](https://github.com/s-berdia/Opencode_router/actions/workflows/ci.yml/badge.svg)](https://github.com/s-berdia/Opencode_router/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](./LICENSE)
+
+**Switch models before you hit your [OpenCode](https://opencode.ai) limit.** Automatic
+model routing and quota failover for the **Go**, **Go Plus**, and **Free** plans.
 
 ![opencode-router demo: the scorecard gives each agent a model, and the build agent changes to the next model at 85% of its 5-hour limit](docs/router-demo.gif)
 
@@ -40,6 +46,15 @@ the router, read its [known limits](./USAGE.md#11-known-limits).
 | Model catalog | Start OpenCode one time before you install. OpenCode then writes `~/.cache/opencode/models.json`. |
 
 ## Quick start
+
+If you have the OpenCode command-line tool, run this command. Then close OpenCode, start
+it again, and go to step 4.
+
+```bash
+opencode plugin @s-berdia/opencode-router --global
+```
+
+If you do not have the command-line tool, edit the config file:
 
 1. Open your global OpenCode config file in a text editor:
    - Windows: `C:\Users\<your-user-name>\.config\opencode\opencode.json`
@@ -209,6 +224,12 @@ npm run typecheck   # check the types
 To use your local build in OpenCode, put the absolute path of the folder in the `plugin`
 list. Example for Windows: `"plugin": ["file:///C:/code/Opencode_router"]`. Run
 `npm run build` after each change, then restart OpenCode.
+
+## Contributing
+
+Bug reports, model scores, and code changes are welcome. Read
+[CONTRIBUTING.md](./CONTRIBUTING.md). For questions and ideas, use
+[Discussions](https://github.com/s-berdia/Opencode_router/discussions).
 
 ## License
 

@@ -1,0 +1,78 @@
+name: Bug report
+description: The router does something wrong, or it stops OpenCode.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for the report. Do not paste API keys, tokens, or private prompts.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Tell what you saw. Paste error messages as text.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Type /refresh-routing
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: router-version
+    attributes:
+      label: Router version
+      description: >
+        The "version" value in
+        ~/.cache/opencode/packages/@s-berdia/opencode-router@latest/node_modules/@s-berdia/opencode-router/package.json,
+        or the version in your plugin entry.
+      placeholder: 1.1.0
+    validations:
+      required: true
+  - type: input
+    id: opencode-version
+    attributes:
+      label: OpenCode version
+      description: Run `opencode --version`, or look in the About window of the Desktop app.
+      placeholder: 1.19.3
+    validations:
+      required: true
+  - type: dropdown
+    id: plan
+    attributes:
+      label: OpenCode plan
+      options:
+        - Go
+        - Go Plus
+        - Free (no subscription)
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - WSL
+    validations:
+      required: true
+  - type: textarea
+    id: scorecard
+    attributes:
+      label: Scorecard or status output
+      description: >
+        Optional. Paste the output of
+        `npx @s-berdia/opencode-router refresh --dry-run --verbose` or `/routing-status`.
+      render: markdown

@@ -1,0 +1,39 @@
+name: Model score request
+description: Add a model to model-scores.json, or correct its score or monthly allowance.
+labels: [model-scores]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        A model without an entry in model-scores.json gets its scores from a name pattern.
+        See "Add or correct a model score" in CONTRIBUTING.md.
+  - type: input
+    id: model-id
+    attributes:
+      label: Model ID
+      description: The full ID, provider and model, as in the scorecard.
+      placeholder: opencode-go/minimax-m2.7
+    validations:
+      required: true
+  - type: dropdown
+    id: change
+    attributes:
+      label: What must change?
+      options:
+        - Add the model (it has no entry)
+        - Correct the intelligence or speed score
+        - Correct the monthly allowance (Go or Go Plus)
+    validations:
+      required: true
+  - type: input
+    id: values
+    attributes:
+      label: Values that you propose
+      placeholder: 'intelligence 82, speed 70, go $60, goPlus $180'
+  - type: textarea
+    id: source
+    attributes:
+      label: Source
+      description: A benchmark page, the OpenCode plan page, or your own test results.
+    validations:
+      required: true
