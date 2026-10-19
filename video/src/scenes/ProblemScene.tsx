@@ -81,7 +81,7 @@ export const ProblemScene: React.FC = () => {
               ),
             }}
           >
-            {"Error: rate limit reached (429)"}
+            {"Error: usage limit reached (429)"}
           </Interactive.Div>
           <Interactive.Div
             name="Retry line"

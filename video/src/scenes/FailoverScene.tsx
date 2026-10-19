@@ -11,12 +11,12 @@ import { inter, mono } from "../fonts";
 export const FailoverScene: React.FC = () => {
   const frame = useCurrentFrame();
   const usage = Math.round(
-    interpolate(frame, [30, 108, 124, 168, 184], [8, 85, 6, 15, 2], {
+    interpolate(frame, [30, 108, 124, 156, 166], [8, 85, 86, 86, 70], {
       extrapolateLeft: "clamp",
       extrapolateRight: "clamp",
     }),
   );
-  const usageColor = interpolateColors(frame, [84, 96, 110, 124], ["#3FB950", "#D29922", "#D29922", "#3FB950"]);
+  const usageColor = interpolateColors(frame, [84, 96, 157, 161], ["#3FB950", "#D29922", "#D29922", "#3FB950"]);
 
   return (
     <AbsoluteFill
@@ -73,7 +73,7 @@ export const FailoverScene: React.FC = () => {
       >
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
           <div style={{ fontSize: 56, fontWeight: 600, color: "#8B98A9" }}>build agent</div>
-          <div style={{ position: "relative", width: 340, height: 84 }}>
+          <div style={{ position: "relative", width: 380, height: 84 }}>
             <Interactive.Div
               name="Healthy chip"
               style={{
@@ -120,7 +120,7 @@ export const FailoverScene: React.FC = () => {
                 }),
               }}
             >
-              failover
+              free model
             </Interactive.Div>
           </div>
         </div>
@@ -131,7 +131,7 @@ export const FailoverScene: React.FC = () => {
               position: "absolute",
               left: 0,
               top: 8,
-              fontSize: 84,
+              fontSize: 72,
               fontWeight: 700,
               color: "#FFFFFF",
               opacity: interpolate(frame, [110, 124, 170, 184], [1, 0, 0, 1], {
@@ -158,7 +158,7 @@ export const FailoverScene: React.FC = () => {
               position: "absolute",
               left: 0,
               top: 8,
-              fontSize: 84,
+              fontSize: 72,
               fontWeight: 700,
               color: "#FFFFFF",
               opacity: interpolate(frame, [110, 124, 170, 184], [0, 1, 1, 0], {
@@ -177,7 +177,7 @@ export const FailoverScene: React.FC = () => {
               ),
             }}
           >
-            deepseek-v4.1-flash
+            nemotron-3.5-lightning-free
           </Interactive.Div>
         </div>
         <div
@@ -188,7 +188,7 @@ export const FailoverScene: React.FC = () => {
             marginTop: 24,
           }}
         >
-          <div style={{ fontSize: 44, fontWeight: 600, color: "#8B98A9" }}>5-hour use</div>
+          <div style={{ fontSize: 44, fontWeight: 600, color: "#8B98A9" }}>Go allowance (5 hours)</div>
           <div style={{ fontFamily: mono, fontSize: 64, fontWeight: 700, color: usageColor }}>{usage}%</div>
         </div>
         <div
@@ -207,7 +207,7 @@ export const FailoverScene: React.FC = () => {
               height: 56,
               borderRadius: 28,
               backgroundColor: usageColor,
-              width: interpolate(frame, [30, 108, 124, 168, 184], [99, 1054, 74, 186, 25], {
+              width: interpolate(frame, [30, 108, 124, 156, 166], [99, 1054, 1066, 1066, 868], {
                 extrapolateLeft: "clamp",
                 extrapolateRight: "clamp",
               }),
@@ -254,7 +254,7 @@ export const FailoverScene: React.FC = () => {
             }),
           }}
         >
-          At 85%, it moves to the next model.
+          At 85%, it moves to a free model.
         </Interactive.Div>
         <Interactive.Div
           name="Reset caption"
@@ -271,7 +271,7 @@ export const FailoverScene: React.FC = () => {
             }),
           }}
         >
-          After the 5-hour reset, it moves back.
+          When the use falls, it moves back.
         </Interactive.Div>
       </div>
     </AbsoluteFill>

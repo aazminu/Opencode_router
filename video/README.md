@@ -8,7 +8,7 @@ This folder contains the source of the demo video in the main README. It is a
 | 1. Problem: the agent stops at a rate limit | `src/scenes/ProblemScene.tsx` |
 | 2. Title | `src/scenes/TitleScene.tsx` |
 | 3. Scorecard: `/refresh-routing` | `src/scenes/ScorecardScene.tsx` |
-| 4. Failover at 85% of the 5-hour limit | `src/scenes/FailoverScene.tsx` |
+| 4. Failover: a free model at 85% of the shared Go allowance | `src/scenes/FailoverScene.tsx` |
 | 5. Install | `src/scenes/InstallScene.tsx` |
 
 `src/RouterDemo.tsx` puts the scenes in sequence. `src/Root.tsx` registers the full

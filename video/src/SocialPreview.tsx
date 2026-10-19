@@ -47,11 +47,11 @@ export const SocialPreview: React.FC = () => {
               border: "2px solid rgba(210, 153, 34, 0.5)",
             }}
           >
-            failover
+            free model
           </div>
         </div>
-        <div style={{ marginTop: 12, fontFamily: mono, fontSize: 34, fontWeight: 700, color: "#FFFFFF" }}>
-          glm-5.3-flash <span style={{ color: "#2DD4BF" }}>→</span> deepseek-v4.1-flash
+        <div style={{ marginTop: 12, fontFamily: mono, fontSize: 30, fontWeight: 700, color: "#FFFFFF" }}>
+          glm-5.3-flash <span style={{ color: "#2DD4BF" }}>→</span> nemotron-3.5-lightning-free
         </div>
         <div
           style={{
@@ -61,7 +61,7 @@ export const SocialPreview: React.FC = () => {
             marginTop: 18,
           }}
         >
-          <div style={{ fontSize: 24, fontWeight: 600, color: "#8B98A9" }}>5-hour use</div>
+          <div style={{ fontSize: 24, fontWeight: 600, color: "#8B98A9" }}>Go allowance (5 hours)</div>
           <div style={{ fontFamily: mono, fontSize: 28, fontWeight: 700, color: "#D29922" }}>85%</div>
         </div>
         <div
