@@ -1,6 +1,6 @@
 {
   "name": "@s-berdia/opencode-router",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Dynamic model routing for OpenCode Go / Go Plus / Free. Picks the best value-for-money model per agent (plan, build, general, explore) and rotates automatically so a 24/7 build plan never runs out.",
   "type": "module",
   "license": "MIT",

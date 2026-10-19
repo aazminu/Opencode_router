@@ -13,6 +13,7 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "routing-status", description: "Show the model in use per role and its 5-hour quota use", args: "status" },
   { name: "routing-plan", description: "Switch the routing plan (go | go-plus | free) and rebuild", args: "plan $1" },
   { name: "routing-eval", description: "Run the router scoring stress test", args: "eval" },
+  { name: "routing-update", description: "Update opencode-router to the newest version", args: "update" },
 ]
 
 const OUTPUT_BEGIN = "---BEGIN ROUTER OUTPUT---"

@@ -1,5 +1,6 @@
 import fs from "node:fs"
 import path from "node:path"
+import { vi } from "vitest"
 import type { CatalogModel } from "../src/types.js"
 
 export function model(partial: Partial<CatalogModel> & { providerID: string; modelID: string }): CatalogModel {
@@ -150,14 +151,20 @@ export function readJsonFile<T = Record<string, unknown>>(file: string): T {
   return JSON.parse(fs.readFileSync(file, "utf8")) as T
 }
 
-/** Minimal PluginInput for the plugin factory; `updates` collects config.update calls. */
-export function stubInput(dir: string, updates: unknown[] = []) {
+/** Minimal PluginInput for the plugin factory; `updates` and `toasts` collect client calls. */
+export function stubInput(dir: string, updates: unknown[] = [], toasts: unknown[] = []) {
   return {
     client: {
       config: {
         update: async (arg: unknown) => {
           updates.push(arg)
           return { data: {} }
+        },
+      },
+      tui: {
+        showToast: async (arg: unknown) => {
+          toasts.push(arg)
+          return { data: true }
         },
       },
     },
@@ -168,6 +175,25 @@ export function stubInput(dir: string, updates: unknown[] = []) {
     serverUrl: new URL("http://127.0.0.1:0"),
     $: (async () => ({})) as unknown,
   } as never
+}
+
+/** Make the npm registry report `version` as the newest version. Returns the requested URLs. */
+export function stubRegistry(version: string): string[] {
+  const calls: string[] = []
+  vi.stubGlobal("fetch", async (url: string | URL) => {
+    calls.push(String(url))
+    return new Response(JSON.stringify({ name: "@s-berdia/opencode-router", version }), { status: 200 })
+  })
+  return calls
+}
+
+/** A copy of the package in the OpenCode plugin cache, in the folder for `spec`. */
+export function cachedCopy(spec: string, version = "1.0.0"): string {
+  const dir = path.join(process.env.XDG_CACHE_HOME!, "opencode", "packages", "@s-berdia", spec)
+  const packageDir = path.join(dir, "node_modules", "@s-berdia", "opencode-router")
+  fs.mkdirSync(packageDir, { recursive: true })
+  fs.writeFileSync(path.join(packageDir, "package.json"), JSON.stringify({ name: "@s-berdia/opencode-router", version }))
+  return dir
 }
 
 /** Capture stdout and stderr writes while `fn` runs. */

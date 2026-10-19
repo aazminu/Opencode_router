@@ -21,6 +21,10 @@ export function evalReportFile(): string {
   return path.join(stateDir(), "eval-report.md")
 }
 
+export function updateCheckFile(): string {
+  return path.join(stateDir(), "update-check.json")
+}
+
 function applyMarkerFile(): string {
   return path.join(stateDir(), "last-apply.json")
 }

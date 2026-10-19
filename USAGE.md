@@ -16,7 +16,8 @@ Do the steps in sequence. Each command has a label that tells you which shell to
 9. [Files and folders](#9-files-and-folders)
 10. [Troubleshooting](#10-troubleshooting)
 11. [Known limits](#11-known-limits)
-12. [Remove the router](#12-remove-the-router)
+12. [Update the router](#12-update-the-router)
+13. [Remove the router](#13-remove-the-router)
 
 ## 1. Before you start
 
@@ -119,8 +120,8 @@ Use this option to test changes to the code.
 
 1. In the OpenCode prompt, type `/` and look at the list of commands. Make sure that
    these commands are in the list: `/refresh-routing`, `/routing-status`,
-   `/routing-plan`, and `/routing-eval`. If they are not in the list, go to
-   [Troubleshooting](#10-troubleshooting).
+   `/routing-plan`, `/routing-eval`, and `/routing-update`. If they are not in the list,
+   go to [Troubleshooting](#10-troubleshooting).
 2. Type this command and push Enter:
 
    ```text
@@ -311,6 +312,19 @@ models of that family.
 }
 ```
 
+### Stop the update check
+
+Once each 24 hours, the router asks npm for the newest version number of the router. It
+sends one request to `registry.npmjs.org` and no other data. When a newer version is
+available, the router shows a toast in OpenCode and a line under the status and the
+scorecard. To stop the check:
+
+```json
+{
+  "updateCheck": false
+}
+```
+
 ### Advanced cost settings
 
 | Key | Default | Meaning |
@@ -356,6 +370,7 @@ These commands work in PowerShell, CMD, Git Bash, macOS, and Linux.
 | `opencode-router plan go-plus --scope global` | Save the plan in the global settings, then calculate and write the routing table |
 | `opencode-router cat` | Show the catalog path, its date, and the number of models |
 | `opencode-router install --scope global` | Write the slash commands as files in `~/.config/opencode/command/`. If `router.config.json` does not exist, it also writes an empty one |
+| `opencode-router update` | Ask npm for the newest version. If the copy that OpenCode keeps is older, remove it. See [Update the router](#12-update-the-router) |
 
 The terminal tool reads the global `router.config.json` and the project file of the
 current folder, in the same way as the plugin.
@@ -436,6 +451,7 @@ The router writes these files:
 | `~/.config/opencode/router/routing-table.json` | Plugin | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | Plugin | The result of the last live apply |
 | `~/.config/opencode/router/eval-report.md` | `/routing-eval` | The test report |
+| `~/.config/opencode/router/update-check.json` | Plugin, `status`, `refresh` | The time of the last update check and the newest version on npm |
 | `~/.config/opencode/opencode.json` | `/refresh-routing`, `/routing-plan` | `model`, `small_model`, and `agent.<role>.model` and `variant` |
 | `~/.config/opencode/router.config.json` | `/routing-plan`, `install` (only if missing) | Your router settings |
 
@@ -466,7 +482,7 @@ Do not commit the `router/` folder. It contains your usage data.
 
 ## 11. Known limits
 
-These are the limits of version 1.0.1.
+These are the limits of version 1.1.0.
 
 1. The router sets the model of the `plan`, `build`, `general`, and `explore` agents at
    each message. If you select a different model by hand, the router replaces it. To
@@ -483,7 +499,59 @@ These are the limits of version 1.0.1.
    rate-limit error for a full session puts only the model of that session into a
    cooldown.
 
-## 12. Remove the router
+## 12. Update the router
+
+OpenCode downloads the plugin one time and then uses its own copy. It does not download
+a newer version automatically. The router looks for a newer version once each 24 hours
+and tells you when one is available.
+
+### With the slash command
+
+1. In the OpenCode prompt, type this command and push Enter:
+
+   ```text
+   /routing-update
+   ```
+
+2. Read the result:
+   - `OpenCode has opencode-router <version>, the newest version.`: you do not have to
+     do more.
+   - `Removed the cached copy: ...`: go to step 3.
+   - `opencode.json pins an older version ...`: do the steps in
+     [With a fixed version](#with-a-fixed-version).
+3. Close OpenCode. Start OpenCode again. OpenCode downloads the newest version when it
+   starts.
+4. Type `/routing-status`. If the line `opencode-router <version> is available` does not
+   show, the update is complete.
+
+Between steps 2 and 3, the router slash commands do not work, because the files that they
+use are removed. Restart OpenCode immediately.
+
+### From a terminal
+
+If the slash commands do not work, close OpenCode and run this command. Then start
+OpenCode again.
+
+```bash
+npx @s-berdia/opencode-router@latest update
+```
+
+This command works in PowerShell, CMD, Git Bash, macOS, and Linux.
+
+### With a fixed version
+
+To select the version yourself, write it in the `plugin` list:
+
+```json
+{
+  "plugin": ["@s-berdia/opencode-router@1.1.0"]
+}
+```
+
+To update, change the number to the new version and restart OpenCode. The newest version
+is on <https://www.npmjs.com/package/@s-berdia/opencode-router>.
+
+## 13. Remove the router
 
 1. Open `opencode.json` (see [step 2](#2-install-the-plugin)).
 2. Remove `"@s-berdia/opencode-router"` from the `plugin` list.
@@ -509,5 +577,6 @@ These are the limits of version 1.0.1.
    ```
 
 6. If you ran `install`, delete these files from `~/.config/opencode/command/`:
-   `refresh-routing.md`, `routing-status.md`, `routing-plan.md`, and `routing-eval.md`.
+   `refresh-routing.md`, `routing-status.md`, `routing-plan.md`, `routing-eval.md`, and
+   `routing-update.md`.
 7. Restart OpenCode.

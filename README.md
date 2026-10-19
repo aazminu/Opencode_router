@@ -66,6 +66,10 @@ the router, read its [known limits](./USAGE.md#11-known-limits).
 
 The router now selects models automatically. You do not have to do more.
 
+OpenCode does not update plugins automatically. When a new version of the router is
+available, the router shows a note. Then type `/routing-update` and restart OpenCode.
+See [Update the router](./USAGE.md#12-update-the-router).
+
 ## Commands
 
 ### In OpenCode
@@ -76,6 +80,7 @@ The router now selects models automatically. You do not have to do more.
 | `/routing-status` | Show the model in use for each agent (after failover) and its 5-hour quota use |
 | `/routing-plan go-plus` | Save a plan profile (`go`, `go-plus`, or `free`) and apply it immediately |
 | `/routing-eval` | Send one test prompt to the `build` models and write a report |
+| `/routing-update` | Look for a newer version and remove the old copy that OpenCode keeps. Then restart OpenCode |
 
 ### In a terminal
 
@@ -88,6 +93,7 @@ npx @s-berdia/opencode-router status                 # models in use and quota u
 npx @s-berdia/opencode-router plan go-plus           # save the plan profile and rebuild
 npx @s-berdia/opencode-router cat                    # catalog file, date, model count
 npx @s-berdia/opencode-router install --scope global # write slash-command files
+npx @s-berdia/opencode-router@latest update          # remove OpenCode's old copy
 npx @s-berdia/opencode-router --help                 # all commands and options
 ```
 
@@ -140,6 +146,7 @@ or a value that is not valid, the router ignores it and shows a note in the scor
 | `blend` | `{ "input": 0.75, "output": 0.25, "cacheRead": 0.1 }` | Token mix used to calculate the cost of one million tokens |
 | `enduranceScale` | `{ "minTokensPer5h": 0.25, "maxTokensPer5h": 40 }` | Millions of tokens per 5 hours that give an endurance score of 0 and 100 |
 | `feeds` | `{ "enabled": false }` | Optional benchmark feed: `{ "enabled": true, "url": "https://...", "timeoutMs": 5000 }` |
+| `updateCheck` | `true` | Once each 24 hours, ask npm for the newest router version. `false` stops the check |
 
 The [usage guide](./USAGE.md#6-change-the-router-settings) has examples for each key.
 
@@ -172,6 +179,7 @@ score = w_intelligence * intelligence
 | `~/.config/opencode/router/routing-table.json` | The last routing table |
 | `~/.config/opencode/router/last-apply.json` | The result of the last live apply |
 | `~/.config/opencode/router/eval-report.md` | The report of the last `/routing-eval` |
+| `~/.config/opencode/router/update-check.json` | The time of the last update check and the newest version on npm |
 | `opencode.json` or `opencode.jsonc` (global, or the project file with `--scope project`) | `model`, `small_model`, and `agent.<role>.model` and `variant`. Comments and all other keys stay. A file with a JSON error is not changed |
 
 If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in place of
@@ -182,6 +190,10 @@ If `XDG_CONFIG_HOME` is set, the router uses `$XDG_CONFIG_HOME/opencode` in plac
 Models with `-free` in their name can collect your prompts for training. The scorecard
 marks them `free*`. To keep your main work off these models, set
 `"privacy": { "freeModelsOk": false }`. To never use them, set `"denyModels": ["*-free"]`.
+
+Once each 24 hours, the router sends one request to `registry.npmjs.org` to get the
+newest version number of the router. It sends no other data. To stop this, set
+`"updateCheck": false`.
 
 ## Development
 

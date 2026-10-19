@@ -50,6 +50,7 @@ function sanitizeUserConfig(raw: Record<string, unknown>, file: string, notes: s
   if (threshold !== undefined && !(typeof threshold === "number" && threshold > 0 && threshold <= 1)) {
     drop("softThreshold", "must be a number above 0 and at most 1")
   }
+  if (config.updateCheck !== undefined && typeof config.updateCheck !== "boolean") drop("updateCheck", "must be true or false")
   for (const key of ["denyModels", "allowModels"]) {
     const list = config[key]
     if (list !== undefined && !(Array.isArray(list) && list.every((item) => typeof item === "string"))) {

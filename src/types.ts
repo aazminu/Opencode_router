@@ -179,6 +179,8 @@ export interface RouterUserConfig {
   allowModels?: string[]
   privacy?: { freeModelsOk?: boolean }
   feeds?: FeedConfig
+  /** Ask npm for a newer router version once per 24 hours (default true). */
+  updateCheck?: boolean
   /** Explicit score overrides, keyed by `provider/model`. */
   scores?: Partial<Record<string, MetricScores>>
 }

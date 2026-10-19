@@ -10,11 +10,16 @@ export function globalConfigDir(): string {
   return path.join(base, "opencode")
 }
 
-/** OpenCode model catalog cache written by the OpenCode CLI/desktop. */
-export function catalogCacheFile(): string {
+/** OpenCode cache directory. Honors XDG_CACHE_HOME like OpenCode does. */
+export function opencodeCacheDir(): string {
   const xdg = process.env.XDG_CACHE_HOME
   const base = xdg && xdg.length > 0 ? xdg : path.join(os.homedir(), ".cache")
-  return path.join(base, "opencode", "models.json")
+  return path.join(base, "opencode")
+}
+
+/** OpenCode model catalog cache written by the OpenCode CLI/desktop. */
+export function catalogCacheFile(): string {
+  return path.join(opencodeCacheDir(), "models.json")
 }
 
 export function globalRouterConfigFile(): string {

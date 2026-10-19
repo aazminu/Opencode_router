@@ -7,6 +7,7 @@ import { SLASH_COMMANDS, commandTemplate, isRouterCommandPrompt } from "./comman
 import { writeJson } from "./paths.js"
 import { clearApplyMarker, ledgerFile, routingTableFile, writeApplyMarker } from "./state.js"
 import { isAgentRole, isPlan, type PlanProfile } from "./types.js"
+import { checkForUpdate, updateNotice } from "./update.js"
 
 const RATE_LIMIT_COOLDOWN_MS = 60 * 60 * 1000
 const AUTH_COOLDOWN_MS = 24 * 60 * 60 * 1000
@@ -41,6 +42,10 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
   const recordedMessages = new Set<string>()
   /** Last model used per session, so a session error cools down only that model. */
   const sessionModels = new Map<string, string>()
+
+  // Started now, shown at the first new session. checkForUpdate never throws.
+  const pendingUpdate = checkForUpdate({ projectDir: dir })
+  let updateToastShown = false
 
   let cached: BuildResult | null = null
   let cachedAt = 0
@@ -172,6 +177,19 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
 
           if (isRateLimitError(info.error)) ledger.cooldown(id, RATE_LIMIT_COOLDOWN_MS, "rate limit / quota")
           else if (isAuthError(info.error)) ledger.cooldown(id, AUTH_COOLDOWN_MS, "auth error")
+        } else if (event.type === "session.created" && !updateToastShown) {
+          updateToastShown = true
+          // Do not hold up the event: the npm request can take a few seconds.
+          void pendingUpdate
+            .then((update) => {
+              if (!update) return
+              return input.client.tui.showToast({
+                body: { title: "opencode-router", message: updateNotice(update), variant: "info", duration: 10_000 },
+              })
+            })
+            .catch(() => {
+              /* the TUI may not be connected */
+            })
         } else if (event.type === "session.error") {
           const { sessionID, error } = event.properties
           const id = sessionID ? sessionModels.get(sessionID) : undefined

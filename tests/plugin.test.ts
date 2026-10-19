@@ -1,8 +1,8 @@
 import fs from "node:fs"
 import path from "node:path"
-import { describe, expect, it } from "vitest"
+import { describe, expect, it, vi } from "vitest"
 import OpencodeRouter from "../src/index.js"
-import { globalOpencodeDir, makeProject, readJsonFile, stubInput, writeCatalog } from "./helpers.js"
+import { globalOpencodeDir, makeProject, readJsonFile, stubInput, stubRegistry, writeCatalog } from "./helpers.js"
 
 interface LedgerFile {
   models: Record<string, { cooldownUntil?: number }>
@@ -67,6 +67,23 @@ describe("plugin commands", () => {
     await hooks["chat.message"]!({ sessionID: "s1", agent: "build", model: small }, output as never)
 
     expect(output.message.model).toEqual(small)
+  })
+})
+
+describe("plugin update notice", () => {
+  it("shows one toast when npm has a newer version", async () => {
+    writeCatalog()
+    stubRegistry("99.0.0")
+    const toasts: unknown[] = []
+    const hooks = await OpencodeRouter(stubInput(makeProject(), [], toasts))
+
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: "s1" } } } } as never)
+    await hooks.event!({ event: { type: "session.created", properties: { info: { id: "s2" } } } } as never)
+
+    await vi.waitFor(() => expect(toasts).toHaveLength(1))
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    expect(toasts).toHaveLength(1)
+    expect(JSON.stringify(toasts[0])).toContain("99.0.0")
   })
 })
 

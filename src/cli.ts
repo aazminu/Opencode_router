@@ -8,6 +8,7 @@ import { installCommands } from "./install.js"
 import { runEval } from "./eval.js"
 import { editJsonFile, globalRouterConfigFile, isProjectDir, projectRouterConfigFile, readJson } from "./paths.js"
 import { ledgerFile, readApplyMarker } from "./state.js"
+import { PACKAGE_NAME, checkForUpdate, clearOutdatedCopies, fetchLatestVersion, updateNotice } from "./update.js"
 import { isPlan, PLAN_PROFILES } from "./types.js"
 import type { ConfigScope, PlanProfile } from "./types.js"
 
@@ -20,6 +21,7 @@ Usage:
   opencode-router install [--scope]     Write slash-command files and a starter config
   opencode-router cat                   Show catalog metadata (path, date, model count)
   opencode-router eval                  Run the scoring stress test
+  opencode-router update                Look for a newer version and clear OpenCode's cached copy
 
 Options:
   --plan <go|go-plus|free>   Plan profile for this run
@@ -108,6 +110,11 @@ function build(opts: CommonOpts) {
   return buildRoutingTable({ plan: opts.plan, catalogFile: opts.catalog, projectDir: opts.cwd })
 }
 
+async function writeUpdateNotice(opts: CommonOpts): Promise<void> {
+  const update = await checkForUpdate({ projectDir: opts.cwd })
+  if (update) process.stdout.write(`\n${updateNotice(update)}\n`)
+}
+
 async function cmdRefresh(opts: CommonOpts): Promise<number> {
   const { table } = await build(opts)
 
@@ -141,6 +148,7 @@ async function cmdRefresh(opts: CommonOpts): Promise<number> {
         "A running OpenCode session recomputes routing on its next message (within 15 s). Restart to reload the UI display now.\n",
       )
     }
+    await writeUpdateNotice(opts)
   }
   return 0
 }
@@ -156,6 +164,7 @@ async function cmdStatus(opts: CommonOpts): Promise<number> {
     process.stdout.write(JSON.stringify({ table: result.table, rows, usage }, null, 2) + "\n")
   } else {
     process.stdout.write(formatStatus(result.table, rows) + "\n")
+    await writeUpdateNotice(opts)
   }
   return 0
 }
@@ -197,6 +206,41 @@ function cmdInstall(opts: CommonOpts): number {
   return 0
 }
 
+/** Compare OpenCode's cached copies, not this process: `npx ...@latest update` is always the newest. */
+async function cmdUpdate(): Promise<number> {
+  const latest = await fetchLatestVersion()
+  if (!latest) {
+    process.stderr.write("error: could not reach the npm registry. Try again later.\n")
+    return 1
+  }
+
+  const { removed, pinned, current, failed } = clearOutdatedCopies(latest)
+  if (failed.length > 0) {
+    for (const { dir, error } of failed) process.stderr.write(`error: could not remove ${dir} (${error})\n`)
+    process.stderr.write(`Close OpenCode, then run this command in a terminal: npx ${PACKAGE_NAME}@latest update\n`)
+    return 1
+  }
+  for (const dir of removed) process.stdout.write(`Removed the cached copy: ${dir}\n`)
+  if (removed.length > 0) {
+    process.stdout.write(`Restart OpenCode. It then installs opencode-router ${latest}.\n`)
+  }
+  if (pinned.length > 0) {
+    process.stdout.write(
+      `opencode.json pins an older version (${pinned.join(", ")}). Change the plugin entry to "${PACKAGE_NAME}@${latest}", then restart OpenCode.\n`,
+    )
+  }
+  if (removed.length > 0 || pinned.length > 0) return 0
+
+  if (current.length > 0) {
+    process.stdout.write(`OpenCode has opencode-router ${latest}, the newest version.\n`)
+  } else {
+    process.stdout.write(
+      `OpenCode has no cached copy of opencode-router. The newest version is ${latest}. If you use a local build, run git pull and npm run build. If your OpenCode has the command "opencode plugin update", run it.\n`,
+    )
+  }
+  return 0
+}
+
 function usageError(error: Error): number {
   process.stderr.write(`error: ${error.message}\n\nRun "opencode-router --help" for usage.\n`)
   return 2
@@ -223,6 +267,8 @@ export async function main(argv: string[], cwd: string = process.cwd()): Promise
         return cmdInstall(opts)
       case "eval":
         return await runEval({ plan: opts.plan, catalog: opts.catalog, json: opts.json, projectDir: opts.cwd })
+      case "update":
+        return await cmdUpdate()
       default:
         throw new UsageError(`unknown command "${command}"`)
     }

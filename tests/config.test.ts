@@ -57,6 +57,12 @@ describe("user config problems", () => {
     expect(table.notes.join("\n")).toMatch(/gold/)
   })
 
+  it("ignores an updateCheck that is not true or false and says so", async () => {
+    writeGlobalConfig(JSON.stringify({ updateCheck: "no" }))
+    const { table } = await build()
+    expect(table.notes.join("\n")).toMatch(/"updateCheck" must be true or false/)
+  })
+
   it("names the real catalog path when no models are found", async () => {
     const file = path.join(process.env.XDG_CACHE_HOME!, "missing.json")
     const { table } = await buildRoutingTable({ catalogFile: file, feeds: emptyFeedScores() })
