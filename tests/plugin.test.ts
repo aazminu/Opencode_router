@@ -50,6 +50,24 @@ describe("plugin commands", () => {
     expect(saved.plan).toBe("go-plus")
     expect(updates).toHaveLength(1)
   })
+
+  it("keeps the small model on the message of a router slash command", async () => {
+    writeCatalog()
+    const hooks = await OpencodeRouter(stubInput(makeProject()))
+    const cfg: Record<string, unknown> = {}
+    await hooks.config!(cfg as never)
+    const command = (cfg.command as Record<string, { model: string; template: string }>)["routing-status"]!
+    const slash = command.model.indexOf("/")
+    const small = { providerID: command.model.slice(0, slash), modelID: command.model.slice(slash + 1) }
+    const output = {
+      message: { agent: "build", model: { ...small } },
+      parts: [{ type: "text", text: command.template }],
+    }
+
+    await hooks["chat.message"]!({ sessionID: "s1", agent: "build", model: small }, output as never)
+
+    expect(output.message.model).toEqual(small)
+  })
 })
 
 describe("plugin failover", () => {

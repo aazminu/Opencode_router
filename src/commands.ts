@@ -15,6 +15,13 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: "routing-eval", description: "Run the router scoring stress test", args: "eval" },
 ]
 
+const OUTPUT_BEGIN = "---BEGIN ROUTER OUTPUT---"
+
+/** True for the prompt of a router slash command. */
+export function isRouterCommandPrompt(parts: readonly { type: string; text?: string }[]): boolean {
+  return parts.some((part) => part.type === "text" && part.text?.includes(OUTPUT_BEGIN) === true)
+}
+
 /** Absolute path of the CLI script that ships next to this module in dist/. */
 function cliScriptPath(): string {
   return fileURLToPath(new URL("./bin.js", import.meta.url)).replace(/\\/g, "/")
@@ -30,7 +37,7 @@ export function commandTemplate(args: string): string {
     "2. Present the text between the markers to the user exactly as written.",
     "3. Do not summarize, reformat, shorten, or reorganize it.",
     "",
-    "---BEGIN ROUTER OUTPUT---",
+    OUTPUT_BEGIN,
     `!\`node "${cliScriptPath()}" ${args} --scope global\``,
     "---END ROUTER OUTPUT---",
   ].join("\n")

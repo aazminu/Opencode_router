@@ -3,7 +3,7 @@ import { buildRoutingTable, healthCheck, pickForRole, type BuildResult } from ".
 import { LedgerStore } from "./ledger.js"
 import { blendedCost } from "./scoring.js"
 import { routingConfigBody } from "./apply.js"
-import { SLASH_COMMANDS, commandTemplate } from "./commands.js"
+import { SLASH_COMMANDS, commandTemplate, isRouterCommandPrompt } from "./commands.js"
 import { writeJson } from "./paths.js"
 import { clearApplyMarker, ledgerFile, routingTableFile, writeApplyMarker } from "./state.js"
 import { isAgentRole, isPlan, type PlanProfile } from "./types.js"
@@ -132,6 +132,8 @@ export const OpencodeRouter: Plugin = async (input: PluginInput) => {
       try {
         const agent = msgInput.agent ?? output.message.agent
         if (!isAgentRole(agent)) return
+        // A router slash command keeps the small model that its config sets.
+        if (isRouterCommandPrompt(output.parts)) return
         const result = await ensure()
         const entry = pickForRole(result.table, agent, healthCheck(result, ledger))
         if (!entry) return
